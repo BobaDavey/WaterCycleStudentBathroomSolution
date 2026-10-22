@@ -216,3 +216,7 @@
 @media(min-width:1600px) { .classGrid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
 @media(max-width:1000px) { .classGrid { grid-template-columns: minmax(0,1fr); }.classPicker select { max-width: 210px; }.rosterSummary { flex-wrap: wrap; gap: 22px; } }
 @media(max-width:640px) { .classPicker select { max-width: 200px; font-size: 10px; }.classPicker>svg { display: none; }.classToolbar { gap: 14px; }.classToolbar>.searchField { width: 100%; }.classOverviewCard { padding: 19px; }.classOverviewCard h2 { font-size: 20px; }.classCardActions { gap: 4px; }.classCardActions>button:first-child { margin-right: 0; }.classCardActions :global(.button.small) { font-size: 10px; padding: 6px 8px; }.classFacts { margin: 19px 0; gap: 15px; }.classFacts span { font-size: 7px; }.classFacts .enrollmentCode { font-size: 20px; }.rosterSummary { gap: 20px; }.rosterSummary>div:first-child { min-width: 100%; }.rosterSummary h2 { font-size: 20px; }.rosterActions { max-width: 270px; }.rosterActions :global(.button.small) { font-size: 9px; }.passwordGate :global(.card) { padding: 18px; }.studentProfile { gap: 10px; }.studentProfile :global(.badge) { margin-left: 47px; } }
+.purposeBadge { font-size: 9px; color: #617a58; background: #f0f5e9; font-weight: 550; }
+.capacitySlot>.purposeBadge { margin-top: 12px; }
+.liveTimer { font-variant-numeric: tabular-nums; }
+.reservationNote { display: block; font-size: 9px; color: #8c7956; margin-top: 6px; white-space: normal; }
