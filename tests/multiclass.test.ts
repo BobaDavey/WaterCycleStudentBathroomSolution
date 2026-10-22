@@ -1,3 +1,4 @@
+import { approveStudent } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -29,7 +30,7 @@ async function refreshed(user: User) {
   return userFrom(row);
 }
 async function register(firstName: string, code = firstClass.code!, username?: string) {
-  return app.signup({ firstName, lastName: 'Learner', username, password: studentPassword, classroomCode: code });
+  return approveStudent(db,app,await app.signup({ firstName, lastName: 'Learner', username, password: studentPassword, classroomCode: code }));
 }
 async function answers(quiz: Quiz) {
   const { rows: [row] } = await db.query<{ questions: Question[] }>('SELECT questions FROM quizzes WHERE id=$1', [quiz.id]);
@@ -199,6 +200,7 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     await app.studentAction(learner, 'return');
     await app.removeStudent(teacher, learner.id);
     await app.enrollStudent(await refreshed(learner), otherClass.code!);
+    await approveStudent(db,app,learner);
     const joined = await refreshed(learner);
     const current = await request(joined);
     await app.studentAction(joined, 'return');

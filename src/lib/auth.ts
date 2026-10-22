@@ -24,7 +24,7 @@ export async function verifyPassword(password: string, hash: string | null) {
 export function digest(value: string) { return createHash('sha256').update(value).digest('hex'); }
 export function safeEqual(a: string, b: string) { const left = Buffer.from(digest(a)); const right = Buffer.from(digest(b)); return timingSafeEqual(left, right); }
 export function userFrom(row: Record<string, unknown>): User {
- return { id: String(row.id), role: row.role as User['role'], firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), classroomId: row.classroom_id == null ? null : String(row.classroom_id), mustChangePassword: Boolean(row.must_change_password), email: row.email == null ? null : String(row.email), tutorialCompleted: row.tutorial_completed !== false };
+ return { id: String(row.id), role: row.role as User['role'], firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), classroomId: row.classroom_id == null ? null : String(row.classroom_id), mustChangePassword: Boolean(row.must_change_password), email: row.email == null ? null : String(row.email), tutorialCompleted: row.tutorial_completed !== false, accountStatus: row.role === 'student' ? (row.account_status ?? 'pending') as User['accountStatus'] : null };
 }
 export async function createSession(db: SQL, userId: string) {
  const token = randomBytes(32).toString('hex');
@@ -33,7 +33,7 @@ export async function createSession(db: SQL, userId: string) {
 }
 export async function sessionUser(db: SQL, token?: string): Promise<User | null> {
  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
- const { rows } = await db.query('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>CURRENT_TIMESTAMP AND u.enabled=TRUE', [digest(token)]);
+ const { rows } = await db.query(`SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>CURRENT_TIMESTAMP AND (u.enabled=TRUE OR u.role='student')`, [digest(token)]);
  return rows[0] ? userFrom(rows[0]) : null;
 }
 export async function rateLimit(db: SQL, key: string, max = 12, minutes = 15) {

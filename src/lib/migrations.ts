@@ -118,6 +118,40 @@ ALTER TABLE quizzes ADD COLUMN visit_id TEXT REFERENCES visits(id);
 UPDATE quizzes SET used=TRUE WHERE used=FALSE;
 `;
 
+export const approvalAndSupportMigration = `
+ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'pending' CHECK(account_status IN ('pending','active','deactivated'));
+UPDATE users SET account_status=CASE WHEN enabled THEN 'active' ELSE 'deactivated' END WHERE role='student';
+ALTER TABLE users ADD COLUMN registered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+UPDATE users SET registered_at=created_at;
+ALTER TABLE users ADD COLUMN approved_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN approved_by TEXT REFERENCES users(id);
+CREATE TABLE student_status_events (
+ id TEXT PRIMARY KEY, student_id TEXT NOT NULL REFERENCES users(id), teacher_id TEXT NOT NULL REFERENCES users(id),
+ classroom_id TEXT NOT NULL REFERENCES classrooms(id), previous_status TEXT NOT NULL, status TEXT NOT NULL,
+ changed_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
+);
+CREATE INDEX students_pending_approval ON users(account_status,registered_at,id) WHERE role='student';
+ALTER TABLE visits ADD COLUMN capacity_paused BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE break_corrections (
+ id TEXT PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES visits(id), teacher_id TEXT NOT NULL REFERENCES users(id),
+ incorrect_returned_at TIMESTAMPTZ NOT NULL, corrected_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(), reason TEXT NOT NULL
+);
+CREATE INDEX break_corrections_visit ON break_corrections(visit_id,corrected_at);
+CREATE TABLE problem_reports (
+ id TEXT PRIMARY KEY, teacher_id TEXT NOT NULL REFERENCES users(id), request_id TEXT NOT NULL,
+ teacher_name TEXT NOT NULL, email TEXT NOT NULL, description TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'need_attention' CHECK(status IN ('need_attention','solved')),
+ submitted_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(), resolved_at TIMESTAMPTZ, changed_by TEXT REFERENCES users(id),
+ UNIQUE(teacher_id,request_id)
+);
+CREATE INDEX problem_reports_order ON problem_reports(status,submitted_at DESC,id DESC);
+CREATE TABLE problem_report_events (
+ id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES problem_reports(id), developer_id TEXT NOT NULL REFERENCES users(id),
+ status TEXT NOT NULL CHECK(status IN ('need_attention','solved')), changed_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
+);
+CREATE INDEX problem_report_events_report ON problem_report_events(report_id,changed_at,id);
+`;
+
 /** Caller holds the PostgreSQL initialization lock and transaction. */
 export async function migrateDatabase(tx: SQL, execute: (sql:string) => Promise<void>): Promise<void> {
  await execute(baselineSchema);
@@ -134,5 +168,9 @@ export async function migrateDatabase(tx: SQL, execute: (sql:string) => Promise<
   await execute(`ALTER TABLE classrooms ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'America/New_York';
 CREATE INDEX visits_departure_reporting ON visits(classroom_id,left_at DESC,id DESC) WHERE left_at IS NOT NULL;`);
   await tx.query('INSERT INTO watercycle_migrations(version) VALUES(3)');
+ }
+ if (!rows.some(row => Number(row.version) === 4)) {
+  await execute(approvalAndSupportMigration);
+  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(4)');
  }
 }

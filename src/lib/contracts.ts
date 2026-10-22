@@ -1,20 +1,22 @@
 export type Role = "admin" | "teacher" | "student";
-export interface User { id: string; role: Role; firstName: string; lastName: string; username: string; classroomId: string | null; mustChangePassword: boolean; email?: string | null; tutorialCompleted: boolean; }
+export type StudentAccountStatus = "pending" | "active" | "deactivated";
+export interface User { id: string; role: Role; firstName: string; lastName: string; username: string; classroomId: string | null; mustChangePassword: boolean; email?: string | null; tutorialCompleted: boolean; accountStatus: StudentAccountStatus | null; }
 export interface Classroom { id: string; teacherId: string; teacherName?: string; name: string; period: string | null; code: string | null; legacyCode?: string | null; timeZone: string; capacity: number; archived: boolean; studentCount: number; }
 export type VisitStatus = "waiting" | "ready" | "out" | "returned" | "cancelled";
 export type BreakPurpose = "restroom" | "water";
-export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; position?: number; }
+export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; reservationPaused: boolean; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; corrections: BreakCorrection[]; position?: number; }
 export interface Question { id: string; prompt: string; options: string[]; correctIndex: number; topic: string; explanation: string; active: boolean; }
 export type QuizQuestion = Omit<Question, "correctIndex" | "explanation" | "active">;
 export interface Quiz { id: string; purpose: BreakPurpose; correctCount: number; question: QuizQuestion; questionToken: string; expiresAt: string; notice?: string; }
-export interface RosterStudent { id: string; firstName: string; lastName: string; username: string; enabled: boolean; registered: boolean; mustChangePassword: boolean; visitsToday: number; classroomId: string | null; }
+export interface PendingStudent extends RosterStudent { classroomName: string; period: string | null; }
+export interface RosterStudent { id: string; firstName: string; lastName: string; username: string; enabled: boolean; accountStatus: StudentAccountStatus; registeredAt: string; approvedAt: string | null; registered: boolean; mustChangePassword: boolean; visitsToday: number; classroomId: string | null; }
 export interface StudentState { user: User; classroom: Classroom | null; currentVisit: Visit | null; activeQuiz: Quiz | null; serverNow: string; activeCount: number; waitingCount: number; recentVisits: Visit[]; availableQuestions: number; canRequestPass: boolean; unavailableReason?: string; }
-export interface TeacherState { user: User; classes: Classroom[]; classroom: Classroom | null; students: RosterStudent[]; questions: Question[]; visits: Visit[]; stats: { out: number; ready: number; waiting: number; tripsToday: number; averageMinutes: number }; }
+export interface TeacherState { user: User; pendingStudents: PendingStudent[]; classes: Classroom[]; classroom: Classroom | null; students: RosterStudent[]; questions: Question[]; visits: Visit[]; stats: { out: number; ready: number; waiting: number; tripsToday: number; averageMinutes: number }; }
 export interface AuthState { user: User | null; setupAvailable?: boolean; adminProvisioned?: boolean; demo?: boolean; }
 export interface QuizResult { passed: boolean; correctCount: number; feedback: { questionId: string; correct: boolean; explanation: string }[]; quiz?: Quiz; visit?: Visit; }
 export interface TeacherAccount { id: string; firstName: string; lastName: string; username: string; email: string | null; enabled: boolean; mustChangePassword: boolean; classCount: number; studentCount: number; createdAt: string; }
 export interface AdminStudent extends RosterStudent { classroomName: string | null; teacherId: string | null; teacherName: string | null; }
-export interface AdminState { user: User; teachers: TeacherAccount[]; classes: Classroom[]; students: AdminStudent[]; stats: { teachers: number; activeTeachers: number; inactiveTeachers: number; activeClasses: number; students: number; tripsToday: number; totalTrips: number; out: number; waiting: number }; }
+export interface AdminState { user: User; attentionTickets: number; teachers: TeacherAccount[]; classes: Classroom[]; students: AdminStudent[]; stats: { teachers: number; activeTeachers: number; inactiveTeachers: number; activeClasses: number; students: number; tripsToday: number; totalTrips: number; out: number; waiting: number }; }
 export interface ClassDetail { classroom: Classroom; students: RosterStudent[]; visits: Visit[]; }
 export interface StudentDetail { student: RosterStudent; visits: Visit[]; }
 export interface RuleViolation { id: string; studentId: string; studentName: string; classroomId: string; classroomName: string; period: string | null; timeZone: string; violatedAt: string; leftAt: string; returnedAt: string | null; durationSeconds: number; ongoing: boolean; totalViolations: number; }
@@ -51,3 +53,16 @@ export interface RuleOffendersState { violations: RuleViolation[]; nextCursor: s
 // PATCH /api/admin/teachers/:id {firstName?:string,lastName?:string,username?:string,email?:string,enabled?:boolean,password?:string} -> {ok:true}
 // PATCH /api/admin/profile {firstName,lastName,email?:string} -> {ok:true}; username immutable
 // No administrator account creation, deletion, demotion or enrollment-management API.
+
+export interface BreakCorrection { id: string; teacherName: string; correctedAt: string; incorrectReturnedAt: string; reason: string; }
+export type TicketStatus = "need_attention" | "solved";
+export interface ProblemReport { id: string; teacherName: string; email: string; description: string; submittedAt: string; status: TicketStatus; resolvedAt: string | null; }
+export interface TicketEvent { id: string; status: TicketStatus; changedAt: string; developerName: string; }
+export interface ProblemReportDetail extends ProblemReport { history: TicketEvent[]; }
+export interface ProblemReportsState { tickets: ProblemReport[]; nextCursor: string | null; attentionCount: number; }
+// PATCH /api/teacher/roster/:id {accountStatus:'active'|'deactivated'} -> {ok:true}; legacy enabled maps to the same statuses.
+// POST /api/teacher/visits/:id/reopen {resolveOlder?:boolean,reason?:string} -> {ok:true}; >24h requires reason and explicit override.
+// POST /api/teacher/reports {teacherName,email,description,requestId:uuid} -> {id}; idempotent per teacher/requestId.
+// GET /api/admin/reports?status=all|need_attention|solved&search=&cursor=&limit=50 -> ProblemReportsState
+// GET /api/admin/reports/:id -> ProblemReportDetail
+// PATCH /api/admin/reports/:id {status:'need_attention'|'solved'} -> {ok:true}

@@ -1,3 +1,4 @@
+import { approveStudent } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -31,7 +32,7 @@ describe('Timestamp-derived rule offenders and private classroom reporting',()=>
     one=await app.createClass(teacher,{name:'Biology A',period:'1',code:'REP01'});
     two=await app.createClass(teacher,{name:'Biology B',period:'2',code:'REP02',timeZone:'Asia/Taipei'});
     foreign=await app.createClass(other,{name:'Other biology',code:'REP03'});
-    learner=await app.signup({firstName:'Jamie',lastName:'Report',password,classroomCode:'rep01'});
+    learner=await approveStudent(db,app,await app.signup({firstName:'Jamie',lastName:'Report',password,classroomCode:'rep01'}));
   });
   after(async()=>await db.close());
 

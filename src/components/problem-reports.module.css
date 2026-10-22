@@ -1,0 +1,10 @@
+.form { padding:24px; display:grid; gap:20px; max-width:780px; }
+.toolbar { padding:24px; display:flex; gap:18px; flex-wrap:wrap; align-items:end; }
+.toolbar label { flex:1; min-width:160px; }
+.description { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; margin:20px 0; max-height:45vh; overflow:auto; }
+.preview { display:block; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+.meta { display:grid; gap:8px; overflow-wrap:anywhere; }
+.history { margin:20px 0; border-top:1px solid var(--line); padding-top:15px; }
+.history li { margin:10px 0; }
+.footer { padding:20px; display:flex; justify-content:center; }
+@media(max-width:600px){.form,.toolbar{padding:18px}.toolbar{align-items:stretch}}

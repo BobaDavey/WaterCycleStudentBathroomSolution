@@ -45,7 +45,7 @@ async function seed() {
       continue;
      }
      const id=randomUUID();
-     await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id) VALUES($1,'student',$2,$3,$4,$5,$6)`,[id,first,last,username,studentHash,classroomId]);
+     await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,account_status) VALUES($1,'student',$2,$3,$4,$5,$6,'active')`,[id,first,last,username,studentHash,classroomId]);
      await enroll(tx,id,classroomId);
      // Only new sample trips receive a purpose; historical trips remain intact.
      if (first !== 'Jamie') await tx.query(`INSERT INTO visits(id,classroom_id,student_id,status,purpose,requested_at,ready_at,left_at,returned_at) VALUES($1,$2,$3,'returned',$4,CURRENT_TIMESTAMP-INTERVAL '42 minutes',CURRENT_TIMESTAMP-INTERVAL '42 minutes',CURRENT_TIMESTAMP-INTERVAL '41 minutes',CURRENT_TIMESTAMP-INTERVAL '37 minutes')`,[randomUUID(),classroomId,id,first.length%2===0?'water':'restroom']);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDatabase } from '@/lib/db';
 import { AppError, cookieName, createSession, digest, rateLimit, sessionUser } from '@/lib/auth';
 import { WaterCycle, adminProfileSchema, classCreateSchema, classUpdateSchema, enrollmentSchema, loginSchema, passwordSchema, questionSchema, requirePasswordChange, rosterSchema, rosterUpdateSchema, signupSchema, teacherCreateSchema, teacherUpdateSchema, transferSchema } from '@/lib/domain';
+import { reportSchema, reportFiltersSchema, reportStatusSchema } from '@/lib/problem-reports';
 import { ruleOffendersSchema } from '@/lib/rule-offenders';
 import type { User } from '@/lib/contracts';
 import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
@@ -10,6 +11,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
 const ok = () => NextResponse.json({ok:true});
+const reopenSchema = z.object({resolveOlder:z.boolean().optional(),reason:z.string().trim().max(2000).optional()});
 const quizStartSchema = z.object({purpose:z.enum(['restroom','water'],{error:'Choose Use Restroom or Drink Water before continuing.'})});
 const answerSchema = z.object({quizId:z.string().uuid(),questionId:z.string().min(1).max(200),questionToken:z.string().uuid(),answer:z.number().int().min(0).max(3)});
 const quizCancelSchema = z.object({quizId:z.string().uuid()});
@@ -61,6 +63,10 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='admin/state'&&method==='GET')return NextResponse.json(await app.adminState(user));
   requirePasswordChange(user);
   if(['teacher/violations','admin/violations'].includes(route)&&method==='GET'){if(user.role!==(path[0]==='teacher'?'teacher':'admin'))throw new AppError(403,'You do not have access to these records.');const filters=ruleOffendersSchema.parse(Object.fromEntries(request.nextUrl.searchParams));return NextResponse.json(await app.ruleOffenders(user,filters));}
+  if(route==='teacher/reports'&&method==='POST'){if(user.role!=='teacher')throw new AppError(403,'Teacher access required.');await rateLimit(db,`reports:${user.id}`,20);return NextResponse.json(await app.submitReport(user,reportSchema.parse(await json())));}
+  if(route==='admin/reports'&&method==='GET')return NextResponse.json(await app.problemReports(user,reportFiltersSchema.parse(Object.fromEntries(request.nextUrl.searchParams))));
+  if(path.length===3&&path[0]==='admin'&&path[1]==='reports'){if(method==='GET')return NextResponse.json(await app.problemReport(user,path[2]));if(method==='PATCH'){await app.changeReportStatus(user,path[2],reportStatusSchema.parse(await json()).status);return ok();}}
+  if(path.length===4&&path[0]==='teacher'&&path[1]==='visits'&&path[3]==='reopen'&&method==='POST'){await app.reopenVisit(user,path[2],reopenSchema.parse(await json()));return ok();}
   if(route==='student/enroll'&&method==='POST'){await app.enrollStudent(user,enrollmentSchema.parse(await json()).classroomCode);return ok();}
   if(route==='student/quiz'&&method==='POST'){await rateLimit(db,`quiz:${user.id}`,30);const input=quizStartSchema.parse(await json());return NextResponse.json(await app.newQuiz(user,input.purpose));}
   if(route==='student/quiz/answer'&&method==='POST')return NextResponse.json(await app.answerQuiz(user,answerSchema.parse(await json())));

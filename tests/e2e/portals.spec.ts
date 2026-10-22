@@ -78,6 +78,8 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await card.getByRole('button', { name: 'View Class', exact: true }).click();
     const row = teacher.getByRole('row').filter({ hasText: username });
     await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Approve', exact: true }).click();
+    await expect(row.getByText('Active', { exact: true })).toBeVisible();
     await row.getByRole('button', { name: 'Transfer', exact: true }).click();
     dialog = teacher.getByRole('dialog');
     const state = await (await teacher.request.get('/api/teacher/state')).json() as TeacherState;
@@ -96,6 +98,9 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await expect(student.getByRole('button', { name: 'Request a Break', exact: true })).toBeVisible();
     studentState = await (await student.request.get('/api/student/state')).json() as StudentState;
     const target = studentState.classroom!;
+    expect(studentState.user.accountStatus).toBe('pending');
+    expect((await teacher.request.patch(`/api/teacher/roster/${studentState.user.id}`, { headers, data: { accountStatus: 'active' } })).ok()).toBe(true);
+    await expect(student.getByText('Your account is awaiting teacher approval.', { exact: true })).toHaveCount(0);
     const questions = (await (await teacher.request.get(`/api/teacher/state?classroomId=${target.id}`)).json() as TeacherState).questions;
     await qualifyBreak(student, questions, 'water');
     await teacher.getByRole('button', { name: 'Back to Class Roster' }).click();

@@ -1,3 +1,4 @@
+import { approveStudent } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -21,7 +22,7 @@ async function teacherFixture(username: string) {
   return userFrom(row);
 }
 async function student(name: string, code = classroom.code!) {
-  return app.signup({ firstName: name, lastName: 'Learner', password, classroomCode: code });
+  return approveStudent(db,app,await app.signup({ firstName: name, lastName: 'Learner', password, classroomCode: code }));
 }
 async function key(quiz: Quiz) {
   const { rows: [row] } = await db.query<{ questions: Question[] }>('SELECT questions FROM quizzes WHERE id=$1', [quiz.id]);
@@ -413,7 +414,7 @@ describe('Sequential learning and fair student break reservations', { concurrenc
     assert.ok(detail.visits.every(visit => visit.status === 'returned' && visit.warningAcknowledgedAt && Date.parse(visit.returnedAt!) - Date.parse(visit.leftAt!) > 12 * 60_000));
     assert.ok((await app.teacherState(teacher, classroom.id)).stats.averageMinutes >= 13);
     await app.updateRoster(teacher, learner.id, { enabled: false });
-    assert.equal(await sessionUser(db, token), null);
+    assert.equal((await sessionUser(db, token))?.accountStatus,'deactivated');
   });
 
   it('shows tutorial eligibility only for new signups or newly claimed roster accounts and saves completion', async () => {
