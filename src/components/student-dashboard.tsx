@@ -218,9 +218,10 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
 
   async function acknowledgeWarning() {
     if (!visit) return;
-    beginMutation(); setDialogError("");
-    try { await post(`/student/visits/${visit.id}/warning`); setAcknowledgedWarnings(previous => new Set(previous).add(visit.id)); }
-    catch (err) { setDialogError(err instanceof Error ? err.message : "Could not save your acknowledgement. Please try again."); }
+    beginMutation(); setDialogError(""); setView("home");
+    setAcknowledgedWarnings(previous => new Set(previous).add(visit.id));
+    try { await post(`/student/visits/${visit.id}/warning`); }
+    catch (err) { setAcknowledgedWarnings(previous => { const next = new Set(previous); next.delete(visit.id); return next; }); setDialogError(err instanceof Error ? err.message : "Could not save your acknowledgement. Please try again."); }
     finally { await finishMutation(); }
   }
 
@@ -276,7 +277,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   const serverNow = now + serverOffset.current;
   const breakMilliseconds = visit?.status === "out" && visit.leftAt ? Math.max(0, serverNow - Date.parse(visit.leftAt)) : 0;
   const showTutorial = !mustChangePassword && Boolean(state?.classroom) && !state?.user.tutorialCompleted && !tutorialCompleted;
-  const showWarning = visit?.status === "out" && breakMilliseconds > 12 * 60000 && !visit.warningAcknowledgedAt && !acknowledgedWarnings.has(visit.id);
+  const showWarning = visit?.status === "out" && breakMilliseconds >= 12 * 60000 && !visit.warningAcknowledgedAt && !acknowledgedWarnings.has(visit.id);
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -373,11 +374,11 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
     </StudentModal>}
     {showWarning && visit && <StudentModal labelledBy="warning-heading" describedBy="warning-copy" warning>
       <div className={`${styles.tutorialArt} ${styles.warningIcon}`}><TriangleAlert size={32} strokeWidth={1.5} /></div>
-      <div className="modal-header"><h2 id="warning-heading">Your Break Has Exceeded 12 Minutes!</h2></div>
-      <p id="warning-copy" className={styles.warningCopy}>Bathroom breaks should last no longer than 10 minutes. If you exceed the 10-minute limit again, you may lose your break privileges for one month.</p>
+      <div className="modal-header"><h2 id="warning-heading">⚠️ You Have Used 12 Minutes!</h2></div>
+      <p id="warning-copy" className={styles.warningCopy}>You have exceeded the 10-minute bathroom break limit.</p><p className={styles.seriousWarning}><strong>IF YOU EXCEED 10 MINUTES AGAIN, YOUR BREAK PRIVILEGES WILL BE TAKEN AWAY.</strong></p>
       <div className={styles.warningTimer}><span>YOUR BREAK TIMER IS STILL RUNNING</span><strong>{elapsed(visit.leftAt, serverNow)}</strong></div>
       {dialogError && <p className={`alert error ${styles.dialogError}`} role="alert">{dialogError}</p>}
-      <div className={styles.warningActions}><button className="button secondary" disabled={busy} onClick={() => void acknowledgeWarning()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It</button><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={17} />I&apos;m Back</button></div>
+      <div className={styles.warningActions}><button className="button primary" disabled={busy} onClick={() => void acknowledgeWarning()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}I Got It</button></div>
     </StudentModal>}
   </div>;
 }

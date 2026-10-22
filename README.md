@@ -12,7 +12,7 @@ npm run dev
 
 Open the **Ports** tab and choose **Open in Browser** for port **3000**. The preview port can stay private. The Codespaces forwarding hostname is allowed automatically during development. If an existing Codespace predates this update, pull `main`, stop the app, and run **Codespaces: Rebuild Container**, or create a new Codespace.
 
-The sign-in page offers **Fill teacher demo** and **Fill student demo**, followed by **Sign in**. The demo is enabled only for an explicitly configured local database, never an external `DATABASE_URL`.
+The sign-in page starts with empty fields. Select the student or teacher sign-in tab and enter a sample account manually; demo autofill buttons have been removed. The demo is enabled only for an explicitly configured local database, never an external `DATABASE_URL`.
 
 | Sample role | Username | Demo-only password |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ The administrator username is fixed to **`davidanzezhang`**. There is no adminis
    npm run dev
    ```
 
-4. Open **`/admin/login`** under the same preview address, or click **Administrator sign in** on the main sign-in page. Sign in with `davidanzezhang` and your private password. Successful sign-in opens **`/admin/dashboard`**.
+4. Open **`/admin/login`** under the same preview address, or click **Developer sign in** on the main sign-in page. Enter `davidanzezhang` and your private password manually; both developer login fields start blank and no username hint is shown. Successful sign-in opens **`/admin/dashboard`**.
 5. After provisioning, remove `ADMIN_INITIAL_PASSWORD` from your Codespaces secrets and restart the Codespace. The stored hash remains valid. Startup never resets an existing administrator's password, even if this variable is later changed. Use **Admin Settings** to change the password securely.
 
 For a Vercel deployment, supply `ADMIN_INITIAL_PASSWORD` privately in the project's environment settings for initial provisioning, then remove it and redeploy after successful setup. A private local `.env.local` may also provide the variable; it is ignored by Git and the CLI loads it without printing values. Proxy-backed HTTP credential placeholders are not suitable for a password that must be hashed locally; use an actual process environment secret.
@@ -46,6 +46,8 @@ For a Vercel deployment, supply `ADMIN_INITIAL_PASSWORD` privately in the projec
 If the private secret is absent, the app does **not** invent a password. Existing teacher and student accounts continue to work. The Admin Portal explains the provisioning step. If a non-administrator already owns the reserved username, provisioning fails clearly and leaves that account untouched; resolve the username conflict deliberately before retrying.
 
 ## Administrator workflow
+
+The public privileged login is labeled **Developer Sign In**. It still authenticates the existing, sole administrator; no developer role or extra account is created. The protected dashboard and `/admin/login` and `/admin/dashboard` routes are preserved.
 
 The administrator has a separate portal and sidebar:
 
@@ -59,13 +61,15 @@ Teacher deactivation revokes login access while preserving classes, student acco
 
 ## Teacher workflow
 
-Sign in on the main page using **I'm a teacher**. Administrators supply new teachers with a temporary password; change it at the first sign-in.
+Sign in on the main page using **I'm a teacher**. **Create a teacher account** opens an informational registration pop-up with the contact email; it does not create or submit an account request. Student sign-in retains its separate student registration link. Administrators supply new teachers with a temporary password; change it at the first sign-in.
 
 1. Open **Class Roster**. The overview lists your classes, periods, enrollment codes, and student counts, with an archived-class view.
 2. Choose **Create Class**. Enter a name, optional period, and your chosen **five-character code** using English letters and numbers, such as `BIO01`, `AB123`, or `00123`. Letters uppercase as you type; enrollment and uniqueness are case-insensitive. Numeric codes and leading zeros are preserved. Active codes are unique across all teachers; duplicates and invalid characters are rejected by both the API and database.
 3. Use **Edit Class** to change names, periods, and codes. Changing a code preserves students and history. **Archive Class** requires confirmation, prevents new enrollment and learning/pass requests, and retains historical records. Students already out can still record their return.
 4. Choose **View Class** to manage that class's roster. Search students, add names ahead of registration, view student details and records, reset passwords, or disable accounts. Removing a student from a class keeps their account and history. Transfers are limited to another active class owned by the same teacher and preserve past activity under its original class.
-5. Select the class for **Overview**, **Question bank**, and **Trip history**. Questions and trips remain scoped to that class. Enrollment-code and class-name controls live only in **Class Roster**; **Classroom settings** retains account security.
+5. Under **Trip history → Rule Offenders**, view one entry per break longer than 12 minutes, including ongoing breaks. Search by student and filter across your active or archived classes. Entries use the original break/class ownership after transfers, show total violations within your classes, and load older records through pagination. The report is read-only and never suspends students.
+6. Set **Class timezone** when creating or editing a class. Existing classes start with `America/New_York`; choose the actual classroom IANA timezone, such as `Asia/Taipei` or `Europe/London`. Rule Offenders dates use this setting, including daylight saving time. Stored timestamps remain unchanged.
+7. Select the class for **Overview**, **Question bank**, and **Trip history**. Questions and trips remain scoped to that class. Enrollment-code and class-name controls live only in **Class Roster**; **Classroom settings** retains account security.
 
 Roster removals and transfers require confirmation. If a student has an active pass, the operation finishes an out trip or cancels a reservation, records the change without deleting history, and releases the old class's space. A removed student can sign in and join another active class with its valid code.
 
@@ -80,11 +84,13 @@ Roster removals and transfers require confirmation. If a student has an active p
 7. Answer one biology question at a time until **Correct Answers: 2/2**. Correct answers accumulate and need not be consecutive. Wrong answers give brief feedback without resetting progress. Unseen questions are used first; after the bank is exhausted, questions cycle with a clear notice. At least two active questions are needed. The current question and correct count survive refreshes and sign-ins during the 15-minute learning attempt; **Cancel learning check** abandons the attempt.
 8. If a space is available after earlier waiters have been served, the break starts automatically on the server immediately after the second correct answer. **Your time is NOW, GRAB A PASS** shows the purpose, running timer, and 10-minute return reminder. No extra departure click is required.
 9. If both spaces are reserved or occupied, the student sees **You're in line!**, a live queue position, the purpose, and **Cancel Request**. Waiting does not start the break timer. When a spot opens, **It's your turn! You're cleared to go.** reserves the space for **two minutes**. **I'm Leaving Now** validates that reservation and records departure. An unanswered reservation expires and the next eligible waiter is promoted automatically on the next poll or class action; an expired student may request again.
-10. **I'm Back** records return and releases the space. At 10 minutes, a reminder appears; after more than 12 minutes, a once-per-break warning appears while the timer continues. Dismissing it is saved to the account's break record. This warning never bans, suspends, disables, or automatically ends a break. Teacher controls remain independent.
+10. **I'm Back** records return and releases the space. At 10 minutes, a reminder appears; at exactly 12 minutes, a serious warning appears with the requested bold red message. **I Got It** closes it immediately and saves acknowledgement to that break record; an unacknowledged warning returns after refresh or login. The timer keeps running. A Rule Offenders entry is counted only **after** 12 minutes, so exactly 12 minutes is not a violation. This warning never bans, suspends, disables, or automatically ends a break. Teacher controls remain independent.
 
 At most **two students per class** may be reserved or out, independently of every other class. Reloading or signing out does not lose a break or queue position. Students see their own account and history plus aggregate capacity counts, never other students' private records. Turn alerts include a prominent in-page message, browser-title change, and optional sound/browser notifications. Keep the page open; browsers can throttle background pages and closed-app push notifications are not provided.
 
 ## Migration and existing records
+
+Rule violations are derived from reliable departure/return timestamps (or the server time for a currently active break). The existing break id is the stable violation id; polling and warning acknowledgements cannot create duplicates. Missing starts, missing completed returns, and invalid negative durations are excluded. No historical violation rows or missing timestamps are invented.
 
 Schema changes run transactionally and are recorded so they can be applied again safely. Existing teachers are associated with their original classrooms. Existing student enrollment, questions, quizzes, sessions, and trip timestamps are preserved. New class ownership and enrollment relationships enforce teacher isolation and prevent duplicate active student enrollments.
 
@@ -131,7 +137,7 @@ npm run build
 npm run test:e2e
 ```
 
-Tests cover legacy-data migration, private/idempotent administrator provisioning, singleton protection, teacher/class ownership, temporary-password changes, case-insensitive alphanumeric code uniqueness and leading zeros, enrollment validation, transfers/history, archived classes, roster isolation, queue concurrency/FIFO, cumulative learning progress/expiry/replay, automatic versus queued departure, reservation expiry/FIFO, tutorial persistence, warning acknowledgments without automatic restrictions, sessions/passwords, and purpose-aware exports. Browser tests recreate only the isolated `.local/e2e-data` fixture. They never reset application data or need your real administrator password; any test administrator secret is generated privately at runtime.
+Tests cover legacy-data migration, private/idempotent administrator provisioning, singleton protection, teacher/class ownership, temporary-password changes, case-insensitive alphanumeric code uniqueness and leading zeros, enrollment validation, transfers/history, archived classes, roster isolation, queue concurrency/FIFO, cumulative learning progress/expiry/replay, automatic versus queued departure, reservation expiry/FIFO, tutorial persistence, warning acknowledgments without automatic restrictions, timestamp-derived violations with strict thresholds/scoped totals/pagination/timezones, empty developer login fields, teacher account-request presentation, sessions/passwords, and purpose-aware exports. Browser tests recreate only the isolated `.local/e2e-data` fixture. They never reset application data or need your real administrator password; any test administrator secret is generated privately at runtime.
 
 Browser tests use Chromium at `/usr/bin/chromium` when present. Otherwise run `npx playwright install chromium`, or set `CHROMIUM_PATH` to your Chromium executable.
 
@@ -141,6 +147,6 @@ Classroom mutations use database row locks and reserve both `ready` and `out` pa
 
 Passwords use salted scrypt hashes. Random sessions are stored hashed and sent through HttpOnly, SameSite cookies, with Secure cookies on HTTPS. Mutations enforce same-origin requests and validated inputs; every privileged query checks the current role and class ownership. Password resets invalidate existing sessions. Exports neutralize spreadsheet formula cells.
 
-Queued reservations have a two-minute response window. Server-side maintenance expires reservations and promotes eligible waiters under the same class row lock used for requests and returns. Polling runs every three seconds in the student portal; the page should remain open for prompt in-app notifications. Break timers use persisted departure timestamps and the server clock, so a refresh or different device does not reset elapsed time. Daily summaries use the database day boundary (UTC by default); displayed timestamps use the viewer's local timezone and CSV timestamps are labeled UTC. Keep PostgreSQL backups through your provider.
+Queued reservations have a two-minute response window. Server-side maintenance expires reservations and promotes eligible waiters under the same class row lock used for requests and returns. Polling runs every three seconds in the student portal; the page should remain open for prompt in-app notifications. Break timers use persisted departure timestamps and the server clock, so a refresh or different device does not reset elapsed time. Daily summaries use the database day boundary (UTC by default); Rule Offenders timestamps use the configured class timezone, other displayed timestamps use the viewer's local timezone, and CSV timestamps are labeled UTC. Keep PostgreSQL backups through your provider.
 
 Source, dependency manifests, tests, and configuration belong in Git. Real passwords, local databases, private environment files, generated builds, dependencies, and claim tokens remain ignored.

@@ -130,4 +130,9 @@ export async function migrateDatabase(tx: SQL, execute: (sql:string) => Promise<
   await execute(studentBreakMigration);
   await tx.query('INSERT INTO watercycle_migrations(version) VALUES(2)');
  }
+ if (!rows.some(row => Number(row.version) === 3)) {
+  await execute(`ALTER TABLE classrooms ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'America/New_York';
+CREATE INDEX visits_departure_reporting ON visits(classroom_id,left_at DESC,id DESC) WHERE left_at IS NOT NULL;`);
+  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(3)');
+ }
 }

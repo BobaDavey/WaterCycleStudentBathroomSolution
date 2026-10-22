@@ -1,6 +1,6 @@
 export type Role = "admin" | "teacher" | "student";
 export interface User { id: string; role: Role; firstName: string; lastName: string; username: string; classroomId: string | null; mustChangePassword: boolean; email?: string | null; tutorialCompleted: boolean; }
-export interface Classroom { id: string; teacherId: string; teacherName?: string; name: string; period: string | null; code: string | null; legacyCode?: string | null; capacity: number; archived: boolean; studentCount: number; }
+export interface Classroom { id: string; teacherId: string; teacherName?: string; name: string; period: string | null; code: string | null; legacyCode?: string | null; timeZone: string; capacity: number; archived: boolean; studentCount: number; }
 export type VisitStatus = "waiting" | "ready" | "out" | "returned" | "cancelled";
 export type BreakPurpose = "restroom" | "water";
 export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; position?: number; }
@@ -17,6 +17,8 @@ export interface AdminStudent extends RosterStudent { classroomName: string | nu
 export interface AdminState { user: User; teachers: TeacherAccount[]; classes: Classroom[]; students: AdminStudent[]; stats: { teachers: number; activeTeachers: number; inactiveTeachers: number; activeClasses: number; students: number; tripsToday: number; totalTrips: number; out: number; waiting: number }; }
 export interface ClassDetail { classroom: Classroom; students: RosterStudent[]; visits: Visit[]; }
 export interface StudentDetail { student: RosterStudent; visits: Visit[]; }
+export interface RuleViolation { id: string; studentId: string; studentName: string; classroomId: string; classroomName: string; period: string | null; timeZone: string; violatedAt: string; leftAt: string; returnedAt: string | null; durationSeconds: number; ongoing: boolean; totalViolations: number; }
+export interface RuleOffendersState { violations: RuleViolation[]; nextCursor: string | null; serverNow: string; }
 // JSON errors: {error:string}; every successful JSON response is a direct contract object.
 // GET /api/auth/me -> AuthState (setupAvailable always false; public teacher setup removed)
 // POST /api/auth/login {username,password,role} -> {user}
@@ -30,6 +32,8 @@ export interface StudentDetail { student: RosterStudent; visits: Visit[]; }
 // POST /api/student/visits/:id/warning {} -> {ok:true} (acknowledge own overdue active break)
 // POST /api/student/leave | return | cancel -> {ok:true}
 // GET /api/teacher/state?classroomId=optional -> TeacherState (default first active owned class; null if none)
+// GET /api/teacher/violations?classroomId=optional&search=optional&cursor=optional&limit=50 -> RuleOffendersState
+// GET /api/admin/violations same filters -> RuleOffendersState (privileged oversight)
 // POST /api/teacher/classes {name,period?:string,code:string} -> {classroom}
 // PATCH /api/teacher/classes/:id {name?:string,period?:string,code?:string,archived?:boolean} -> {classroom}
 // POST /api/teacher/roster?classroomId=id {firstName,lastName} -> {student}
@@ -45,5 +49,5 @@ export interface StudentDetail { student: RosterStudent; visits: Visit[]; }
 // GET /api/admin/state -> AdminState; GET /api/admin/classes/:id -> ClassDetail
 // POST /api/admin/teachers {firstName,lastName,username,email?:string,password,enabled:boolean} -> {teacher}
 // PATCH /api/admin/teachers/:id {firstName?:string,lastName?:string,username?:string,email?:string,enabled?:boolean,password?:string} -> {ok:true}
-// PATCH /api/admin/profile {firstName,lastName,email?:string} -> {ok:true}; username immutable davidanzezhang
+// PATCH /api/admin/profile {firstName,lastName,email?:string} -> {ok:true}; username immutable
 // No administrator account creation, deletion, demotion or enrollment-management API.

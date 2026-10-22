@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDatabase } from '@/lib/db';
 import { AppError, cookieName, createSession, digest, rateLimit, sessionUser } from '@/lib/auth';
 import { WaterCycle, adminProfileSchema, classCreateSchema, classUpdateSchema, enrollmentSchema, loginSchema, passwordSchema, questionSchema, requirePasswordChange, rosterSchema, rosterUpdateSchema, signupSchema, teacherCreateSchema, teacherUpdateSchema, transferSchema } from '@/lib/domain';
+import { ruleOffendersSchema } from '@/lib/rule-offenders';
 import type { User } from '@/lib/contracts';
 import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
 export const runtime = 'nodejs';
@@ -59,6 +60,7 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='teacher/state'&&method==='GET')return NextResponse.json(await app.teacherState(user,classroomId));
   if(route==='admin/state'&&method==='GET')return NextResponse.json(await app.adminState(user));
   requirePasswordChange(user);
+  if(['teacher/violations','admin/violations'].includes(route)&&method==='GET'){if(user.role!==(path[0]==='teacher'?'teacher':'admin'))throw new AppError(403,'You do not have access to these records.');const filters=ruleOffendersSchema.parse(Object.fromEntries(request.nextUrl.searchParams));return NextResponse.json(await app.ruleOffenders(user,filters));}
   if(route==='student/enroll'&&method==='POST'){await app.enrollStudent(user,enrollmentSchema.parse(await json()).classroomCode);return ok();}
   if(route==='student/quiz'&&method==='POST'){await rateLimit(db,`quiz:${user.id}`,30);const input=quizStartSchema.parse(await json());return NextResponse.json(await app.newQuiz(user,input.purpose));}
   if(route==='student/quiz/answer'&&method==='POST')return NextResponse.json(await app.answerQuiz(user,answerSchema.parse(await json())));

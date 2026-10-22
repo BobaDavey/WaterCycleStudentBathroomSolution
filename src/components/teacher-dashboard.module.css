@@ -220,3 +220,5 @@
 .capacitySlot>.purposeBadge { margin-top: 12px; }
 .liveTimer { font-variant-numeric: tabular-nums; }
 .reservationNote { display: block; font-size: 9px; color: #8c7956; margin-top: 6px; white-space: normal; }
+
+.activityTabs{margin-bottom:20px}.activityTabs :global(.tab){min-width:110px}

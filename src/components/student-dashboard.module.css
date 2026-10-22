@@ -183,3 +183,8 @@
 @media (max-width: 720px) { .enrollmentCard { padding: 24px; } .enrollmentCard h2 { font-size: 29px; } .enrollmentCard form { max-width: none; } }
 @media (max-width: 720px) { .purposeCard { padding: 23px; } .purposeCard h2 { font-size: 29px; } .purposeOptions { gap: 10px; } .purposeOption { padding: 21px 10px; } .purposeOption strong { font-size: 12px; } .purposeOption > span { width: 55px; height: 55px; } .quizCard :global(.card-header) { align-items: flex-start; flex-wrap: wrap; } .tutorialSteps { gap: 9px; } .tutorialSteps > li { padding: 13px; } .studentDialog { max-height: calc(100dvh - 32px); } .studentDialog :global(.modal-header) h2 { font-size: 29px; } .out .successHeading { font-size: 31px; } }
 @media (max-width: 390px) { .tutorialSteps { grid-template-columns: 1fr; } .tutorialSteps > li { display: grid; grid-template-columns: 42px 1fr; gap: 10px; align-items: center; } .tutorialStepTop { display: grid; gap: 5px; margin: 0; } .warningActions { flex-direction: column; } }
+
+.seriousWarning { color: #b42318; font-size: 14px; line-height: 1.8; margin-top: 18px; }
+.seriousWarning strong { font-weight: 800; }
+.warningDialog { border: 2px solid #d6a49a; }
+.warningIcon { color: #b42318; background: #fbeae6; border-color: #ebc7bd; }

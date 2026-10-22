@@ -5,6 +5,7 @@ import { ArrowRight, ArrowUpRight, BookOpen, Check, ChevronLeft, Droplets, Gradu
 import { api, post } from "@/lib/client";
 import type { AuthState, Role, User } from "@/lib/contracts";
 import { TeacherDashboard } from "@/components/teacher-dashboard";
+import { TeacherAccountRequest } from "@/components/teacher-account-request";
 import { StudentDashboard } from "@/components/student-dashboard";
 
 type Mode = "login" | "signup";
@@ -13,7 +14,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialError, setInitialError] = useState("");
-  const [demo, setDemo] = useState(false);
+  const [teacherRequestOpen, setTeacherRequestOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("login");
   const [role, setRole] = useState<Role>("student");
   const [error, setError] = useState("");
@@ -29,7 +30,7 @@ export default function Home() {
     setLoading(true); setInitialError("");
     try {
       const state = await api<AuthState>("/auth/me");
-      setUser(state.user); setDemo(!!state.demo);
+      setUser(state.user);
     } catch (err) { setInitialError((err as Error).message); }
     finally { setLoading(false); }
   }
@@ -105,10 +106,10 @@ export default function Home() {
           {error && <div className="alert error" role="alert">{error}</div>}
           <button className="button primary auth-submit" disabled={busy} type="submit">{busy ? <><LoaderCircle size={17} className="spin" /> One moment…</> : <>{mode === "login" ? "Sign in" : "Create my account"}<ArrowRight size={18} /></>}</button>
         </form>
-        {mode === "login" && <><p className="auth-signup">New here? <button onClick={() => { setRole("student"); changeMode("signup"); }}>Create a student account <ArrowUpRight size={14} /></button></p>{role === "teacher" && <p className="auth-signup">Teacher accounts are created by your administrator.</p>}<a className="setup-link" href="/admin/login">Administrator sign in</a></>}
-        {demo && mode === "login" && <div className="demo-box"><span>TAKE A LOOK AROUND</span><p>This local demo has sample accounts ready to explore.</p><div><button onClick={() => { setRole("teacher"); setUsername("morganreed"); setPassword("WaterCycle2026!"); setError(""); }}>Fill teacher demo <ArrowUpRight size={13} /></button><button onClick={() => { setRole("student"); setUsername("jamiechen"); setPassword("Biology2026!"); setError(""); }}>Fill student demo <ArrowUpRight size={13} /></button></div></div>}
+        {mode === "login" && <><p className="auth-signup">New here? <button type="button" onClick={() => { if (role === "teacher") setTeacherRequestOpen(true); else changeMode("signup"); }}>{role === "teacher" ? "Create a teacher account" : "Create a student account"} <ArrowUpRight size={14} /></button></p><a className="setup-link" href="/admin/login">Developer sign in</a></>}
       </div>
       <footer className="auth-panel-footer"><span>LEARN. TAKE A BREAK. COME BACK.</span><span>Made for real classrooms <Leaf size={13} /></span></footer>
     </section>
+    {teacherRequestOpen && <TeacherAccountRequest onClose={() => setTeacherRequestOpen(false)} />}
   </main>;
 }

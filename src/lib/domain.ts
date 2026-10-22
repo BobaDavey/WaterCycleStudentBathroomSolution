@@ -5,6 +5,7 @@ import { AppError, hashPassword, userFrom, usernameFor, verifyPassword } from '.
 import { ADMIN_USERNAME } from './bootstrap-admin';
 import type { BreakPurpose, AdminState, AdminStudent, ClassDetail, Classroom, Question, Quiz, QuizResult, RosterStudent, StudentDetail, StudentState, TeacherAccount, TeacherState, User, Visit } from './contracts';
 import { defaultQuestions } from './default-questions';
+import { loadRuleOffenders, type RuleOffendersFilters } from './rule-offenders';
 
 const name = z.string().trim().min(1, 'Please enter a name.').max(50);
 const password = z.string().min(8, 'Passwords must have at least 8 characters.').max(128);
@@ -13,12 +14,13 @@ const email = z.union([z.email().max(254), z.literal(''), z.null()]).transform(v
 const code = z.string().regex(/^[A-Za-z0-9]{5}$/, 'Enrollment codes must contain exactly five English letters or numbers.').transform(value => value.toUpperCase());
 const className = z.string().trim().min(1, 'Please enter a class name.').max(100);
 const period = z.string().trim().max(50).optional();
+const timeZone = z.string().trim().min(1).max(80).refine(value => { try { new Intl.DateTimeFormat('en',{timeZone:value}); return true; } catch { return false; } }, 'Choose a valid IANA timezone, such as America/New_York.');
 export const loginSchema = z.object({ username: z.string().trim().min(1).max(100), password: z.string().min(1).max(128), role: z.enum(['student','teacher','admin']) });
 export const signupSchema = z.object({ firstName: name, lastName: name, username: username.optional(), password, classroomCode: code });
 export const enrollmentSchema = z.object({ classroomCode: code });
 export const setupSchema = z.object({}).passthrough();
-export const classCreateSchema = z.object({ name: className, period, code });
-export const classUpdateSchema = z.object({ name: className.optional(), period: z.union([z.string().trim().max(50), z.null()]).optional(), code: code.optional(), archived: z.boolean().optional() }).refine(v => Object.keys(v).length > 0, 'Choose a change.');
+export const classCreateSchema = z.object({ name: className, period, code, timeZone: timeZone.optional() });
+export const classUpdateSchema = z.object({ name: className.optional(), period: z.union([z.string().trim().max(50), z.null()]).optional(), code: code.optional(), archived: z.boolean().optional(), timeZone: timeZone.optional() }).refine(v => Object.keys(v).length > 0, 'Choose a change.');
 export const classroomSchema = classUpdateSchema;
 export const questionSchema = z.object({ prompt: z.string().trim().min(8).max(1000), options: z.array(z.string().trim().min(1).max(300)).length(4), correctIndex: z.number().int().min(0).max(3), topic: z.string().trim().min(1).max(80), explanation: z.string().trim().max(2000).default(''), active: z.boolean().default(true) }).refine(q => new Set(q.options.map(s => s.toLowerCase())).size === 4, { message: 'Each answer option must be different.' });
 export const rosterSchema = z.object({ firstName: name, lastName: name });
@@ -33,7 +35,7 @@ export const adminProfileSchema = z.object({ firstName: name, lastName: name, em
 type Row = Record<string, unknown>;
 function iso(value: unknown): string | null { return value ? new Date(value as string | Date).toISOString() : null; }
 function nullable(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
-export function classroomFrom(row: Row): Classroom { return { id: String(row.id), teacherId: String(row.teacher_id), teacherName: `${row.teacher_first_name ?? ''} ${row.teacher_last_name ?? ''}`.trim() || undefined, name: String(row.name), period: nullable(row.period), code: nullable(row.code), legacyCode: nullable(row.legacy_code), capacity: Number(row.capacity), archived: Boolean(row.archived), studentCount: Number(row.student_count || 0) }; }
+export function classroomFrom(row: Row): Classroom { return { id: String(row.id), teacherId: String(row.teacher_id), teacherName: `${row.teacher_first_name ?? ''} ${row.teacher_last_name ?? ''}`.trim() || undefined, name: String(row.name), period: nullable(row.period), code: nullable(row.code), timeZone: String(row.time_zone ?? 'America/New_York'), legacyCode: nullable(row.legacy_code), capacity: Number(row.capacity), archived: Boolean(row.archived), studentCount: Number(row.student_count || 0) }; }
 function questionFrom(row: Row): Question { return { id: String(row.id), prompt: String(row.prompt), options: row.options as string[], correctIndex: Number(row.correct_index), topic: String(row.topic), explanation: String(row.explanation), active: Boolean(row.active) }; }
 function visitFrom(row: Row): Visit { return { id: String(row.id), studentId: String(row.student_id), studentName: `${row.first_name} ${row.last_name}`, classroomId: String(row.classroom_id), classroomName: String(row.classroom_name ?? ''), status: row.status as Visit['status'], purpose: (row.purpose ?? null) as BreakPurpose | null, requestedAt: iso(row.requested_at)!, readyAt: iso(row.ready_at), readyExpiresAt: iso(row.ready_expires_at), leftAt: iso(row.left_at), returnedAt: iso(row.returned_at), warningAcknowledgedAt: iso(row.warning_acknowledged_at) }; }
 function rosterFrom(row: Row): RosterStudent { return { id: String(row.id), firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), enabled: Boolean(row.enabled), registered: Boolean(row.password_hash), mustChangePassword: Boolean(row.must_change_password), visitsToday: Number(row.visits_today || 0), classroomId: nullable(row.current_classroom_id ?? row.classroom_id) }; }
@@ -271,8 +273,8 @@ export class WaterCycle {
  }
  async acknowledgeWarning(user:User,visitId:string) {
   await currentActor(this.db,user,'student');
-  const {rows}=await this.db.query("UPDATE visits SET warning_acknowledged_at=COALESCE(warning_acknowledged_at,CURRENT_TIMESTAMP) WHERE id=$1 AND student_id=$2 AND status='out' AND left_at<CURRENT_TIMESTAMP-INTERVAL '12 minutes' RETURNING id",[visitId,user.id]);
-  if(!rows.length)throw new AppError(409,'Only your current break after more than 12 minutes can be acknowledged.');
+  const {rows}=await this.db.query("UPDATE visits SET warning_acknowledged_at=COALESCE(warning_acknowledged_at,statement_timestamp()) WHERE id=$1 AND student_id=$2 AND status='out' AND left_at<=statement_timestamp()-INTERVAL '12 minutes' RETURNING id",[visitId,user.id]);
+  if(!rows.length)throw new AppError(409,'Only your current break at or after 12 minutes can be acknowledged.');
  }
  async studentAction(user: User, action:'leave'|'return'|'cancel') {
   assertRole(user,'student');requirePasswordChange(user);
@@ -316,25 +318,35 @@ export class WaterCycle {
   return{user,classes:classes.map(classroomFrom),classroom:classroomFrom(classroom),students:students.map(rosterFrom),questions:questions.map(questionFrom),visits:visitModels,stats:{out:Number(stats.out),ready:Number(stats.ready),waiting:Number(stats.waiting),tripsToday:Number(stats.trips_today),averageMinutes:Number(stats.average_minutes||0)}};
  }
  async createClass(user: User,input:z.infer<typeof classCreateSchema>):Promise<Classroom> {
-  input={...input,code:normalizedCode(input.code)};
+  input={...input,code:normalizedCode(input.code),timeZone:timeZone.parse(input.timeZone ?? 'America/New_York')};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    await currentActor(tx,user,'teacher',true);const id=randomUUID();
-   const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code) VALUES($1,$2,$3,$4,$5) RETURNING *',[id,user.id,input.name,input.period || null,input.code]);
+   const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code,time_zone) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[id,user.id,input.name,input.period || null,input.code,input.timeZone]);
    await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2 AND classroom_id IS NULL',[id,user.id]);await this.seedQuestions(tx,id);return classroomFrom(row);
   });
  }
  async updateClass(user:User,id:string,input:z.infer<typeof classUpdateSchema>):Promise<Classroom> {
   if(input.code!==undefined)input={...input,code:normalizedCode(input.code)};
+  if(input.timeZone!==undefined)input={...input,timeZone:timeZone.parse(input.timeZone)};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    const current=await this.selectedClass(user,id,tx,true);await currentActor(tx,user,'teacher',true);
    const nextCode=input.code??nullable(current.code);const archived=input.archived??Boolean(current.archived);
    if(!archived&&!nextCode)throw new AppError(400,'Choose a five-character enrollment code before activating this class.');
-   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id]);
+   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??current.time_zone]);
    if(archived&&!current.archived){await tx.query("UPDATE visits SET status='cancelled' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[id]);await tx.query('UPDATE quizzes SET used=TRUE WHERE classroom_id=$1 AND used=FALSE',[id]);}
    return classroomFrom({...row,student_count:current.student_count});
   });
  }
  async updateClassroom(_user:User,_input:unknown):Promise<Classroom> {throw new AppError(410,'Manage class names and enrollment codes from Class Roster.');}
+ async ruleOffenders(user:User,filters:RuleOffendersFilters={}) {
+  if(user.role==='admin')await currentActor(this.db,user,'admin',true);
+  else await currentActor(this.db,user,'teacher',true);
+  if(filters.classroomId) {
+   if(user.role==='teacher')await this.selectedClass(user,filters.classroomId);
+   else if(!(await this.db.query('SELECT id FROM classrooms WHERE id=$1',[filters.classroomId])).rows.length)throw new AppError(404,'Class not found.');
+  }
+  return loadRuleOffenders(this.db,user.role==='teacher'?user.id:null,filters);
+ }
  async addRoster(user:User,input:z.infer<typeof rosterSchema>,classroomId?:string):Promise<RosterStudent> {
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    const classroom=await this.selectedClass(user,classroomId,tx,true);await currentActor(tx,user,'teacher',true);if(classroom.archived)throw new AppError(409,'Archived classes cannot accept new students.');
