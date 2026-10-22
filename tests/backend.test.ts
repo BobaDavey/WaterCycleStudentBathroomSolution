@@ -6,14 +6,13 @@ import { AppError, createSession, digest, hashPassword, rateLimit, sessionUser, 
 import { WaterCycle, questionSchema, requirePasswordChange } from '../src/lib/domain';
 import type { Question, Quiz, User } from '../src/lib/contracts';
 
-const setupKey = 'only-a-test-setup-key';
 const password = 'Biology-test-2026!';
 const rejectsStatus = (status: number) => (error: unknown) => error instanceof AppError && error.status === status;
 let db: Database;
 let app: WaterCycle;
 let teacher: User;
 let code: string;
-let previousSetupKey: string | undefined;
+let classroomId: string;
 
 async function student(firstName: string, lastName = 'Student') {
   return app.signup({ firstName, lastName, password, classroomCode: code });
@@ -30,40 +29,41 @@ async function activeCount() {
   const { rows: [row] } = await db.query<{ count: number }>("SELECT COUNT(*) AS count FROM visits WHERE status IN ('ready','out')");
   return Number(row.count);
 }
-async function otherTeacher() {
-  const classroomId = randomUUID();
-  await db.query('INSERT INTO classrooms(id,name,code) VALUES($1,$2,$3)', [classroomId, 'Other classroom', 'OTHER123']);
-  const { rows: [row] } = await db.query("INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id) VALUES($1,'teacher','Other','Teacher','otherteacher',$2,$3) RETURNING *", [randomUUID(), await hashPassword(password), classroomId]);
+async function insertTeacher(username: string, firstName = 'Morgan', lastName = 'Reed') {
+  const { rows: [row] } = await db.query("INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id) VALUES($1,'teacher',$2,$3,$4,$5,NULL) RETURNING *", [randomUUID(), firstName, lastName, username, await hashPassword(password)]);
   return userFrom(row);
+}
+async function otherTeacher() {
+  const owner = await insertTeacher('otherteacher', 'Other', 'Teacher');
+  await db.query('INSERT INTO classrooms(id,teacher_id,name,code) VALUES($1,$2,$3,$4)', [randomUUID(), owner.id, 'Other classroom', '09009']);
+  return owner;
 }
 
 describe('WaterCycle persistent classroom workflow', { concurrency: false }, () => {
   before(async () => {
-    previousSetupKey = process.env.TEACHER_SETUP_KEY;
-    process.env.TEACHER_SETUP_KEY = setupKey;
-    db = await createDatabase({ directory: 'memory://' });
+    db = await createDatabase({ directory: 'memory://', bootstrapAdmin: false });
     app = new WaterCycle(db);
   });
   beforeEach(async () => {
-    await db.query('TRUNCATE rate_limits,sessions,quizzes,visits,questions,users,classrooms CASCADE');
-    teacher = await app.setup({ firstName: 'Morgan', lastName: 'Reed', username: 'morganreed', password, classroomName: 'Biology 2', setupKey });
-    code = (await app.teacherState(teacher)).classroom.code;
+    await db.query('TRUNCATE rate_limits,sessions,quizzes,visits,questions,enrollments,users,classrooms CASCADE');
+    teacher = await insertTeacher('morganreed');
+    const classroom = await app.createClass(teacher, { name: 'Biology 2', period: '2', code: '01001' });
+    classroomId = classroom.id;
+    code = classroom.code!;
   });
   after(async () => {
     await db?.close();
-    if (previousSetupKey === undefined) delete process.env.TEACHER_SETUP_KEY;
-    else process.env.TEACHER_SETUP_KEY = previousSetupKey;
   });
 
-  it('protects teacher bootstrap and initializes the biology question bank', async () => {
+  it('initializes the class biology bank while preserving the teacher account', async () => {
     const state = await app.teacherState(teacher);
     assert.ok(state.questions.length >= 12);
-    assert.equal(state.classroom.capacity, 2);
-    assert.equal(state.classroom.name, 'Biology 2');
-    await assert.rejects(() => app.setup({ firstName: 'Bad', lastName: 'Teacher', username: 'badteacher', password, classroomName: 'Bad', setupKey: 'wrong' }), rejectsStatus(403));
-    await assert.rejects(() => app.setup({ firstName: 'Second', lastName: 'Teacher', username: 'secondteacher', password, classroomName: 'Second', setupKey }), rejectsStatus(409));
-    const { rows } = await db.query("SELECT id FROM users WHERE role='teacher'");
-    assert.equal(rows.length, 1);
+    assert.equal(state.classroom?.capacity, 2);
+    assert.equal(state.classroom?.name, 'Biology 2');
+    assert.equal(state.classroom?.code, '01001');
+    assert.equal(state.classroom?.teacherId, teacher.id);
+    assert.equal(state.classes.length, 1);
+    assert.equal((await app.login({ username: teacher.username, password, role: 'teacher' })).id, teacher.id);
   });
 
   it('uses salted passwords and restricts login to the requested role', async () => {
@@ -160,12 +160,12 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
       VALUES ($1,$4,$5,'ready',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days',NULL),
              ($2,$4,$6,'out',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days'),
              ($3,$4,$7,'waiting',CURRENT_TIMESTAMP-INTERVAL '2 days',NULL,NULL)`,
-      [...activeIds, teacher.classroomId, ready.id, out.id, waiting.id]);
+      [...activeIds, classroomId, ready.id, out.id, waiting.id]);
     await db.query(`INSERT INTO visits(id,classroom_id,student_id,status,requested_at,ready_at,left_at,returned_at)
       SELECT 'history-' || n::text,$1,$2,'returned',
         CURRENT_TIMESTAMP-n*INTERVAL '1 minute',CURRENT_TIMESTAMP-n*INTERVAL '1 minute',
         CURRENT_TIMESTAMP-n*INTERVAL '1 minute',CURRENT_TIMESTAMP-(n-1)*INTERVAL '1 minute'
-      FROM generate_series(1,1005) n`, [teacher.classroomId, history.id]);
+      FROM generate_series(1,1005) n`, [classroomId, history.id]);
     const state = await app.teacherState(teacher);
     for (const id of activeIds) assert.ok(state.visits.some(visit => visit.id === id), `Active pass ${id} must remain visible`);
     assert.equal(state.visits.filter(visit => ['ready', 'out', 'waiting'].includes(visit.status)).length, 3);
