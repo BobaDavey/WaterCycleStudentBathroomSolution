@@ -17,13 +17,17 @@ let classroomId: string;
 async function student(firstName: string, lastName = 'Student') {
   return app.signup({ firstName, lastName, password, classroomCode: code });
 }
-async function answerKey(quiz: Quiz): Promise<number[]> {
+async function answerKey(quiz: Quiz): Promise<number> {
   const { rows: [row] } = await db.query<{ questions: Question[] }>('SELECT questions FROM quizzes WHERE id=$1', [quiz.id]);
-  return row.questions.map(q => q.correctIndex);
+  return row.questions.find(question => question.id === quiz.question.id)!.correctIndex;
+}
+async function answer(user: User, quiz: Quiz, value?: number) {
+  return app.answerQuiz(user, { quizId: quiz.id, questionId: quiz.question.id, questionToken: quiz.questionToken, answer: value ?? await answerKey(quiz) });
 }
 async function pass(user: User) {
-  const quiz = await app.newQuiz(user);
-  return app.submitQuiz(user, quiz.id, await answerKey(quiz));
+  const first = await answer(user, await app.newQuiz(user, 'restroom'));
+  assert.equal(first.passed, false);
+  return answer(user, first.quiz!);
 }
 async function activeCount() {
   const { rows: [row] } = await db.query<{ count: number }>("SELECT COUNT(*) AS count FROM visits WHERE status IN ('ready','out')");
@@ -92,22 +96,16 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
     await assert.rejects(() => app.login({ username: 'jamiechen', password, role: 'student' }), rejectsStatus(401));
   });
 
-  it('returns exactly two distinct random questions with no answer keys', async () => {
+  it('shows one distinct question at a time without answer keys until two answers are correct', async () => {
     const learner = await student('Jamie', 'Chen');
-    const quiz = await app.newQuiz(learner);
-    assert.equal(quiz.questions.length, 2);
-    assert.notEqual(quiz.questions[0].id, quiz.questions[1].id);
-    for (const question of quiz.questions) {
-      assert.equal(question.options.length, 4);
-      assert.equal('correctIndex' in question, false);
-      assert.equal('explanation' in question, false);
-      assert.equal('active' in question, false);
-    }
-    const answers = await answerKey(quiz);
-    const failed = await app.submitQuiz(learner, quiz.id, [(answers[0] + 1) % 4, answers[1]]);
+    const quiz = await app.newQuiz(learner, 'restroom');
+    assert.equal(quiz.question.options.length, 4);
+    for (const key of ['correctIndex', 'explanation', 'active']) assert.equal(key in quiz.question, false);
+    const failed = await answer(learner, quiz, (await answerKey(quiz) + 1) % 4);
     assert.equal(failed.passed, false);
-    assert.equal(failed.correctCount, 1);
+    assert.equal(failed.correctCount, 0);
     assert.equal(failed.visit, undefined);
+    assert.notEqual(failed.quiz?.question.id, quiz.question.id);
     assert.equal((await app.studentState(learner)).currentVisit, null);
     assert.ok(failed.feedback.every(item => typeof item.explanation === 'string'));
     assert.equal((await pass(learner)).passed, true);
@@ -115,40 +113,39 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
 
   it('serializes concurrent successful requests and never grants a third slot', async () => {
     const learners = await Promise.all(['Jamie', 'Alex', 'Sam', 'Casey', 'Riley', 'Avery'].map(first => student(first)));
-    const quizzes = await Promise.all(learners.map(learner => app.newQuiz(learner)));
-    const keys = await Promise.all(quizzes.map(answerKey));
-    const results = await Promise.all(learners.map((learner, i) => app.submitQuiz(learner, quizzes[i].id, keys[i])));
-    assert.equal(results.filter(result => result.visit?.status === 'ready').length, 2);
+    const results = await Promise.all(learners.map(pass));
+    assert.equal(results.filter(result => result.visit?.status === 'out').length, 2);
     assert.equal(results.filter(result => result.visit?.status === 'waiting').length, 4);
     assert.equal(await activeCount(), 2);
     const states = await Promise.all(learners.map(learner => app.studentState(learner)));
     assert.ok(states.every(state => state.activeCount === 2 && state.waitingCount === 4));
-    const ready = states.filter(state => state.currentVisit?.status === 'ready');
-    await Promise.all(ready.map(state => app.studentAction(state.user, 'leave')));
-    assert.equal(await activeCount(), 2);
+    assert.ok(states.filter(state => state.currentVisit?.status === 'out').every(state => state.currentVisit?.leftAt));
     const waiting = states.find(state => state.currentVisit?.status === 'waiting')!;
     await assert.rejects(() => app.studentAction(waiting.user, 'leave'), rejectsStatus(409));
   });
 
-  it('promotes students in FIFO order and records departure only when they leave', async () => {
+  it('promotes students in FIFO order and starts queued timers only after departure', async () => {
     const [first, second, third, fourth] = await Promise.all(['First', 'Second', 'Third', 'Fourth'].map(first => student(first)));
     for (const learner of [first, second, third, fourth]) await pass(learner);
-    assert.equal((await app.studentState(first)).currentVisit?.leftAt, null);
+    assert.ok((await app.studentState(first)).currentVisit?.leftAt);
+    assert.equal((await app.studentState(third)).currentVisit?.leftAt, null);
     assert.equal((await app.studentState(third)).currentVisit?.position, 1);
     assert.equal((await app.studentState(fourth)).currentVisit?.position, 2);
-    await app.studentAction(first, 'leave');
     const departed = (await app.studentState(first)).currentVisit!;
     assert.equal(departed.status, 'out');
     assert.ok(departed.leftAt);
     await app.studentAction(first, 'return');
     assert.equal((await app.studentState(third)).currentVisit?.status, 'ready');
+    assert.equal((await app.studentState(third)).currentVisit?.leftAt, null);
+    await app.studentAction(third, 'leave');
+    assert.ok((await app.studentState(third)).currentVisit?.leftAt);
     assert.equal((await app.studentState(fourth)).currentVisit?.status, 'waiting');
     const firstState = await app.studentState(first);
     assert.equal(firstState.currentVisit, null);
     assert.equal(firstState.recentVisits[0].status, 'returned');
     assert.ok(firstState.recentVisits[0].returnedAt);
     assert.equal(await activeCount(), 2);
-    await app.studentAction(second, 'cancel');
+    await app.studentAction(second, 'return');
     assert.equal((await app.studentState(fourth)).currentVisit?.status, 'ready');
     assert.equal(await activeCount(), 2);
   });
@@ -156,10 +153,10 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
   it('retains older active passes when more than 1000 newer completed trips exist', async () => {
     const [ready, out, waiting, history] = await Promise.all(['Ready', 'Out', 'Waiting', 'History'].map(first => student(first)));
     const activeIds = [randomUUID(), randomUUID(), randomUUID()];
-    await db.query(`INSERT INTO visits(id,classroom_id,student_id,status,requested_at,ready_at,left_at)
-      VALUES ($1,$4,$5,'ready',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days',NULL),
-             ($2,$4,$6,'out',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days'),
-             ($3,$4,$7,'waiting',CURRENT_TIMESTAMP-INTERVAL '2 days',NULL,NULL)`,
+    await db.query(`INSERT INTO visits(id,classroom_id,student_id,status,requested_at,ready_at,left_at,ready_expires_at)
+      VALUES ($1,$4,$5,'ready',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP+INTERVAL '2 minutes'),
+             ($2,$4,$6,'out',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days',CURRENT_TIMESTAMP-INTERVAL '2 days',NULL),
+             ($3,$4,$7,'waiting',CURRENT_TIMESTAMP-INTERVAL '2 days',NULL,NULL,NULL)`,
       [...activeIds, classroomId, ready.id, out.id, waiting.id]);
     await db.query(`INSERT INTO visits(id,classroom_id,student_id,status,requested_at,ready_at,left_at,returned_at)
       SELECT 'history-' || n::text,$1,$2,'returned',
@@ -174,20 +171,18 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
     assert.deepEqual({ out: state.stats.out, ready: state.stats.ready, waiting: state.stats.waiting }, { out: 1, ready: 1, waiting: 1 });
   });
 
-  it('rejects replayed, expired, superseded, and another student’s quizzes', async () => {
+  it('resumes pending attempts and rejects expired or another student’s answers and retired batch submissions', async () => {
     const learner = await student('Jamie');
     const other = await student('Alex');
-    const firstQuiz = await app.newQuiz(learner);
-    const nextQuiz = await app.newQuiz(learner);
-    await assert.rejects(() => app.submitQuiz(learner, firstQuiz.id, [0, 0]), rejectsStatus(409));
-    await assert.rejects(() => app.submitQuiz(other, nextQuiz.id, [0, 0]), rejectsStatus(409));
+    const firstQuiz = await app.newQuiz(learner, 'restroom');
+    const nextQuiz = await app.newQuiz(learner, 'restroom');
+    assert.deepEqual(nextQuiz, firstQuiz);
+    await assert.rejects(() => app.submitQuiz(learner, firstQuiz.id, [0, 0]), rejectsStatus(410));
+    await assert.rejects(() => answer(other, nextQuiz), rejectsStatus(409));
     await db.query("UPDATE quizzes SET expires_at=CURRENT_TIMESTAMP-INTERVAL '1 minute' WHERE id=$1", [nextQuiz.id]);
-    await assert.rejects(() => app.submitQuiz(learner, nextQuiz.id, [0, 0]), rejectsStatus(409));
-    const current = await app.newQuiz(learner);
-    const answers = await answerKey(current);
-    await app.submitQuiz(learner, current.id, answers);
-    await assert.rejects(() => app.submitQuiz(learner, current.id, answers), rejectsStatus(409));
-    await assert.rejects(() => app.newQuiz(learner), rejectsStatus(409));
+    await assert.rejects(() => answer(learner, nextQuiz), rejectsStatus(409));
+    await pass(learner);
+    await assert.rejects(() => app.newQuiz(learner, 'restroom'), rejectsStatus(409));
     const { rows } = await db.query("SELECT id FROM visits WHERE student_id=$1 AND status IN ('ready','waiting','out')", [learner.id]);
     assert.equal(rows.length, 1);
   });
@@ -195,12 +190,11 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
   it('keeps students out of teacher tools and exposes only their own visit history', async () => {
     const [learner, other] = await Promise.all([student('Jamie'), student('Alex')]);
     await pass(other);
-    await app.studentAction(other, 'leave');
     await app.studentAction(other, 'return');
     await assert.rejects(() => app.teacherState(learner), rejectsStatus(403));
     await assert.rejects(() => app.addRoster(learner, { firstName: 'Bad', lastName: 'Actor' }), rejectsStatus(403));
     await assert.rejects(() => app.studentState(teacher), rejectsStatus(403));
-    await assert.rejects(() => app.newQuiz(teacher), rejectsStatus(403));
+    await assert.rejects(() => app.newQuiz(teacher, 'restroom'), rejectsStatus(403));
     const state = await app.studentState(learner);
     assert.equal(state.currentVisit, null);
     assert.deepEqual(state.recentVisits, []);
@@ -238,12 +232,12 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
     const resetUser = await app.login({ username: learner.username, password: 'Temporary-2026!', role: 'student' });
     assert.equal(resetUser.mustChangePassword, true);
     assert.throws(() => requirePasswordChange(resetUser), rejectsStatus(403));
-    await assert.rejects(() => app.newQuiz(resetUser), rejectsStatus(403));
+    await assert.rejects(() => app.newQuiz(resetUser, 'restroom'), rejectsStatus(403));
     await assert.rejects(() => app.changePassword(resetUser, 'wrong', 'A-new-password-2026!'), rejectsStatus(400));
     await app.changePassword(resetUser, 'Temporary-2026!', 'A-new-password-2026!');
     const changedUser = await app.login({ username: learner.username, password: 'A-new-password-2026!', role: 'student' });
     assert.equal(changedUser.mustChangePassword, false);
-    assert.equal((await app.newQuiz(changedUser)).questions.length, 2);
+    assert.ok((await app.newQuiz(changedUser, 'restroom')).question.id);
   });
 
   it('expires sessions and never stores bearer tokens in plaintext', async () => {
@@ -260,12 +254,12 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
   it('releases a disabled student’s slot and promotes the next student', async () => {
     const [first, second, third] = await Promise.all(['First', 'Second', 'Third'].map(first => student(first)));
     for (const learner of [first, second, third]) await pass(learner);
-    await app.studentAction(first, 'leave');
     const token = await createSession(db, first.id);
     await app.updateRoster(teacher, first.id, { enabled: false });
     assert.equal(await sessionUser(db, token), null);
     assert.equal((await app.studentState(third)).currentVisit?.status, 'ready');
-    assert.equal((await app.studentState(first)).recentVisits[0].status, 'returned');
+    await assert.rejects(() => app.studentState(first), rejectsStatus(403));
+    assert.equal((await app.rosterDetail(teacher, first.id)).visits[0].status, 'returned');
     assert.equal(await activeCount(), 2);
     await app.updateRoster(teacher, first.id, { enabled: true });
     assert.equal((await app.login({ username: first.username, password, role: 'student' })).id, first.id);
@@ -273,28 +267,30 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
 
   it('preserves question snapshots through edits and deletion, but stops new quizzes below two active questions', async () => {
     const learner = await student('Jamie');
-    const quiz = await app.newQuiz(learner);
-    const answers = await answerKey(quiz);
+    const quiz = await app.newQuiz(learner, 'restroom');
     const state = await app.teacherState(teacher);
     for (const q of state.questions) await app.deleteQuestion(teacher, q.id);
     assert.deepEqual((await app.teacherState(teacher)).questions, []);
-    assert.equal((await app.submitQuiz(learner, quiz.id, answers)).passed, true);
-    await app.studentAction(learner, 'cancel');
-    await assert.rejects(() => app.newQuiz(learner), rejectsStatus(409));
+    const first = await answer(learner, quiz);
+    assert.equal((await answer(learner, first.quiz!)).passed, true);
+    await app.studentAction(learner, 'return');
+    await assert.rejects(() => app.newQuiz(learner, 'restroom'), rejectsStatus(409));
     const fresh = questionSchema.parse({ prompt: 'Which organelle performs photosynthesis?', options: ['Chloroplast', 'Nucleus', 'Ribosome', 'Mitochondrion'], correctIndex: 0, topic: 'Cells', explanation: 'Chloroplasts contain chlorophyll.', active: true });
     await app.saveQuestion(teacher, fresh);
-    await assert.rejects(() => app.newQuiz(learner), rejectsStatus(409));
+    await assert.rejects(() => app.newQuiz(learner, 'restroom'), rejectsStatus(409));
     await app.saveQuestion(teacher, { ...fresh, prompt: 'Which organelle makes most cellular ATP?', correctIndex: 3 });
-    assert.equal((await app.newQuiz(learner)).questions.length, 2);
+    assert.ok((await app.newQuiz(learner, 'restroom')).question.id);
   });
 
   it('supports teacher pass management without allowing invalid trip transitions', async () => {
     const learner = await student('Jamie');
+    const blockers = await Promise.all(['FirstBlocker', 'SecondBlocker'].map(name => student(name)));
+    for (const blocker of blockers) await pass(blocker);
     const firstVisit = (await pass(learner)).visit!;
     await assert.rejects(() => app.teacherVisit(teacher, firstVisit.id, 'return'), rejectsStatus(409));
     await app.teacherVisit(teacher, firstVisit.id, 'cancel');
+    await app.studentAction(blockers[0], 'return');
     const secondVisit = (await pass(learner)).visit!;
-    await app.studentAction(learner, 'leave');
     await assert.rejects(() => app.studentAction(learner, 'cancel'), rejectsStatus(409));
     await assert.rejects(() => app.teacherVisit(teacher, secondVisit.id, 'cancel'), rejectsStatus(409));
     await app.teacherVisit(teacher, secondVisit.id, 'return');

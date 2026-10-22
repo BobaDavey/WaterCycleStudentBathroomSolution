@@ -33,11 +33,14 @@ async function register(firstName: string, code = firstClass.code!, username?: s
 }
 async function answers(quiz: Quiz) {
   const { rows: [row] } = await db.query<{ questions: Question[] }>('SELECT questions FROM quizzes WHERE id=$1', [quiz.id]);
-  return row.questions.map(question => question.correctIndex);
+  return row.questions.find(question => question.id === quiz.question.id)!.correctIndex;
+}
+async function answer(user: User, quiz: Quiz) {
+  return app.answerQuiz(user, { quizId: quiz.id, questionId: quiz.question.id, questionToken: quiz.questionToken, answer: await answers(quiz) });
 }
 async function request(user: User) {
-  const quiz = await app.newQuiz(user);
-  return (await app.submitQuiz(user, quiz.id, await answers(quiz))).visit!;
+  const first = await answer(user, await app.newQuiz(user, 'restroom'));
+  return (await answer(user, first.quiz!)).visit!;
 }
 
 // Every administrator test uses a newly generated, ephemeral password. No real
@@ -59,7 +62,7 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
   });
   after(async () => { await db?.close(); });
 
-  it('creates multiple owned classes, keeps leading zeros, and enforces five digits in PostgreSQL', async () => {
+  it('creates multiple owned classes, keeps leading zeros, and enforces five alphanumeric characters in PostgreSQL', async () => {
     const leading = await app.createClass(teacher, { name: 'Early biology', period: '0', code: '00001' });
     assert.equal(leading.code, '00001');
     assert.equal(leading.teacherId, teacher.id);
@@ -67,7 +70,7 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     assert.equal(state.classes.length, 3);
     assert.ok(state.classes.every(classroom => classroom.teacherId === teacher.id));
     assert.equal(state.classes.some(classroom => classroom.id === otherClass.id), false);
-    for (const code of ['1234', '123456', '12a45', ' 12345', '12345 ']) {
+    for (const code of ['1234', '123456', 'AB@12', ' 12345', '12345 ']) {
       await assert.rejects(db.query('INSERT INTO classrooms(id,teacher_id,name,code) VALUES($1,$2,$3,$4)', [randomUUID(), teacher.id, 'Invalid code class', code]), sqlCode('23514'));
     }
     await assert.rejects(() => app.createClass(otherTeacher, { name: 'Duplicate code', period: '4', code: '00001' }), error => status(409)(error) || sqlCode('23505')(error));
@@ -77,7 +80,6 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
   it('edits class names and codes without moving students or deleting existing trips', async () => {
     const learner = await register('Existing');
     const visit = await request(learner);
-    await app.studentAction(learner, 'leave');
     await app.studentAction(learner, 'return');
     const updated = await app.updateClass(teacher, firstClass.id, { name: 'Updated biology', period: 'A', code: '00007' });
     assert.equal(updated.name, 'Updated biology');
@@ -95,20 +97,21 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
 
   it('archives classes without erasing records, rejects archived enrollment, and permits only returns', async () => {
     const learner = await register('Out');
-    const queued = await register('Reserved');
+    const second = await register('SecondOut');
+    const queued = await register('Queued');
     await request(learner);
-    await app.studentAction(learner, 'leave');
+    await request(second);
     await request(queued);
     await app.updateClass(teacher, firstClass.id, { archived: true });
     const archived = await app.teacherState(teacher, firstClass.id);
     assert.equal(archived.classroom?.archived, true);
-    assert.equal(archived.students.length, 2);
+    assert.equal(archived.students.length, 3);
     await assert.rejects(() => register('ArchivedCode'), status(400));
     assert.equal((await app.studentState(learner)).canRequestPass, false);
     assert.equal((await app.studentState(queued)).currentVisit, null);
     await app.studentAction(learner, 'return');
     assert.ok((await app.studentState(learner)).recentVisits.some(visit => visit.status === 'returned'));
-    await assert.rejects(() => app.newQuiz(learner), status(409));
+    await assert.rejects(() => app.newQuiz(learner, 'restroom'), status(409));
     const reused = await app.createClass(otherTeacher, { name: 'Reused available code', period: '4', code: firstClass.code! });
     assert.equal(reused.code, firstClass.code);
     assert.notEqual(reused.id, firstClass.id);
@@ -134,7 +137,6 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
   it('transfers students only within the owning teacher and preserves departure history and FIFO', async () => {
     const [moving, reserved, waiting] = await Promise.all(['Moving', 'Reserved', 'Waiting'].map(name => register(name)));
     const original = await request(moving);
-    await app.studentAction(moving, 'leave');
     await request(reserved);
     await request(waiting);
     await assert.rejects(() => app.transferStudent(teacher, moving.id, otherClass.id), status(404));
@@ -152,28 +154,25 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     assert.equal(old.status, 'returned');
     assert.ok(old.leftAt && old.returnedAt);
     assert.equal((await app.studentState(moved)).recentVisits.some(visit => visit.id === old.id), true);
-    assert.equal((await app.newQuiz(moved)).questions.length, 2);
+    assert.ok((await app.newQuiz(moved, 'restroom')).question.id);
   });
 
   it('invalidates quizzes issued before a transfer or removal', async () => {
     const learner = await register('Quiz');
-    const quiz = await app.newQuiz(learner);
-    const key = await answers(quiz);
+    const quiz = await app.newQuiz(learner, 'restroom');
     await app.transferStudent(teacher, learner.id, secondClass.id);
     const moved = await refreshed(learner);
-    await assert.rejects(() => app.submitQuiz(moved, quiz.id, key), status(409));
-    const next = await app.newQuiz(moved);
-    const nextKey = await answers(next);
+    await assert.rejects(() => answer(moved, quiz), status(409));
+    const next = await app.newQuiz(moved, 'restroom');
     await app.removeStudent(teacher, learner.id);
     const removed = await refreshed(learner);
-    await assert.rejects(() => app.submitQuiz(removed, next.id, nextKey), status(409));
+    await assert.rejects(() => answer(removed, next), status(409));
     assert.equal((await app.studentState(removed)).currentVisit, null);
   });
 
   it('removes enrollment without deleting accounts, and lets the same account enroll again', async () => {
     const learner = await register('Removed');
     const visit = await request(learner);
-    await app.studentAction(learner, 'leave');
     await app.removeStudent(teacher, learner.id);
     const existing = await app.login({ username: learner.username, password: studentPassword, role: 'student' });
     assert.equal(existing.id, learner.id);
@@ -182,7 +181,7 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     assert.equal(state.classroom, null);
     assert.equal(state.canRequestPass, false);
     assert.equal(state.recentVisits[0].id, visit.id);
-    await assert.rejects(() => app.newQuiz(existing), status(409));
+    await assert.rejects(() => app.newQuiz(existing, 'restroom'), status(409));
     await app.enrollStudent(existing, secondClass.code!);
     const reenrolled = await refreshed(existing);
     assert.equal(reenrolled.classroomId, secondClass.id);
@@ -197,13 +196,11 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
   it('keeps historical student details scoped to the selected teacher-owned class', async () => {
     const learner = await register('History');
     const old = await request(learner);
-    await app.studentAction(learner, 'leave');
     await app.studentAction(learner, 'return');
     await app.removeStudent(teacher, learner.id);
     await app.enrollStudent(await refreshed(learner), otherClass.code!);
     const joined = await refreshed(learner);
     const current = await request(joined);
-    await app.studentAction(joined, 'leave');
     await app.studentAction(joined, 'return');
     const previousDetail = await app.rosterDetail(teacher, learner.id, firstClass.id);
     assert.equal(previousDetail.visits.some(visit => visit.id === old.id), true);
@@ -221,7 +218,7 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     for (const learner of [...primary, ...secondary]) await request(learner);
     for (const classroom of [firstClass, secondClass]) {
       const state = await app.teacherState(teacher, classroom.id);
-      assert.equal(state.stats.ready, 2);
+      assert.equal(state.stats.out, 2);
       assert.equal(state.stats.waiting, 1);
     }
     const firstQuestion = (await app.teacherState(teacher, firstClass.id)).questions[0];
@@ -252,7 +249,6 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
   it('deactivates teachers without deleting their classes, students, or records', async () => {
     const learner = await register('Preserved');
     const visit = await request(learner);
-    await app.studentAction(learner, 'leave');
     const token = await createSession(db, teacher.id);
     await app.updateTeacher(administrator, teacher.id, teacherUpdateSchema.parse({ enabled: false }));
     const disabledAccount = (await app.adminState(administrator)).teachers.find(account => account.id === teacher.id)!;
