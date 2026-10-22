@@ -15,7 +15,7 @@ Use these accounts in the current testing environment. Select the appropriate si
 | Teacher | `teachertest` | `1234567890` |
 | Student | `teststudent` | `1234567890` |
 
-These are public testing credentials. The Developer Portal uses its separately provisioned administrator account and private password. For a newly created local database, see the [local sample accounts](#local-sample-accounts) below; the seed script has its own fixtures and preserves existing credentials.
+These are public testing credentials. For a newly created local database, see the [local sample accounts](#local-sample-accounts) below; the seed script has its own fixtures and preserves existing credentials.
 
 ## Features at a glance
 
@@ -118,13 +118,10 @@ After the ticket is saved, **Report Submitted!** confirms success and the form c
 
 ## Developer Portal
 
-Use **Developer sign in** on the main page or open **`/admin/login`**. Both login fields start blank. The Developer Portal authenticates the existing sole administrator and opens **`/admin/dashboard`**.
-
 - **Dashboard:** application-wide teacher, class, student, and trip statistics.
 - **Teachers:** create teacher accounts; edit account information; reset passwords; activate or deactivate teacher access. Deactivation preserves classes, rosters, questions, and history.
 - **Classes and Students:** read-only oversight with teacher/class filters and activity records.
 - **Problem Reports:** search by teacher name, email, or ticket ID; filter status; open full descriptions; load older reports; solve or reopen tickets. A sidebar badge counts tickets needing attention.
-- **Admin Settings:** edit the administrator profile and password. The administrator username is fixed, and the account cannot be deleted, demoted, disabled, or used to create another administrator.
 
 New tickets start **Need Attention**. Solving changes the status to **Solved**, records the resolution time and developer account, and preserves the submission. Reopening keeps prior resolution history. The default view shows unresolved tickets; the all-status view places unresolved tickets first, newest first within each status group. Teachers and students cannot access developer ticket APIs.
 
@@ -178,29 +175,18 @@ These fixtures are separate from the current testing accounts listed at the top 
 | Teacher | `morganreed`, `mariamiller` | `WaterCycle2026!` |
 | Student | `jamiechen`, `alexrivera`, `sampatel` | `Biology2026!` |
 
-The seed creates two teachers, four classes, 18 approved sample students, biology banks, and completed sample trips. Morgan's classes use `01001` and `01002`; Maria's use `02001` and `02002`. Previously changed passwords remain unchanged. No default administrator password is seeded.
+The seed creates two teachers, four classes, 18 approved sample students, biology banks, and completed sample trips. Morgan's classes use `01001` and `01002`; Maria's use `02001` and `02002`. Previously changed passwords remain unchanged.
 
 </details>
 
 Local PGlite data lives in ignored **`.local/data`**. Stop the app before running a seed or administrator bootstrap command against that directory. Separate running instances need separate `LOCAL_DATABASE_PATH` values. See [local database safety](docs/local-database.md).
 
-## Provision the administrator
-
-The sole administrator username is **`davidanzezhang`**. Its password must be supplied privately; WaterCycle has no built-in administrator password.
-
-1. Set **`ADMIN_INITIAL_PASSWORD`** through a repository-scoped Codespaces secret, Vercel environment setting, or ignored local `.env.local`. Use your own password of at least eight characters.
-2. Initialize the database. Startup creates the administrator only if it does not already exist. For explicit local provisioning, stop the app and run `npm run admin:bootstrap`.
-3. Start the app and sign in at **`/admin/login`** with the fixed username and your private password.
-4. Remove the initial-password variable and restart/redeploy after successful provisioning. Existing password hashes remain valid; the variable never resets an existing administrator password. Use **Admin Settings** for later password changes.
-
-If no secret is supplied, no substitute password is created. Existing teacher and student accounts continue working. If another account already owns the reserved administrator username, provisioning stops without overwriting it.
-
 ## Deploy to Vercel
 
 1. Import this repository as a **Next.js** project, using the repository root and `npm run build`.
 2. Connect managed PostgreSQL, such as Neon, and set **`DATABASE_URL`** privately. Preserve the provider's TLS settings and use its pooled connection URL when available.
-3. Supply **`ADMIN_INITIAL_PASSWORD`** privately for first-time administrator provisioning. Keep `LOCAL_DATABASE` and `DEMO_MODE` disabled.
-4. Deploy and sign in through **Developer sign in**. Remove the initial-password variable and redeploy after provisioning.
+3. Keep `LOCAL_DATABASE` and `DEMO_MODE` disabled.
+4. Deploy the application.
 5. Create teacher accounts. Teachers change their temporary passwords, create classes and enrollment codes, and approve newly registered students.
 
 Vercel's local filesystem is not persistent storage; a shared deployment requires PostgreSQL. Updating this repository does not itself publish a Vercel deployment.
