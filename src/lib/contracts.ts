@@ -1,16 +1,17 @@
 export type Role = "admin" | "teacher" | "student";
-export interface User { id: string; role: Role; firstName: string; lastName: string; username: string; classroomId: string | null; mustChangePassword: boolean; email?: string | null; }
+export interface User { id: string; role: Role; firstName: string; lastName: string; username: string; classroomId: string | null; mustChangePassword: boolean; email?: string | null; tutorialCompleted: boolean; }
 export interface Classroom { id: string; teacherId: string; teacherName?: string; name: string; period: string | null; code: string | null; legacyCode?: string | null; capacity: number; archived: boolean; studentCount: number; }
 export type VisitStatus = "waiting" | "ready" | "out" | "returned" | "cancelled";
-export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; status: VisitStatus; requestedAt: string; readyAt: string | null; leftAt: string | null; returnedAt: string | null; position?: number; }
+export type BreakPurpose = "restroom" | "water";
+export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; position?: number; }
 export interface Question { id: string; prompt: string; options: string[]; correctIndex: number; topic: string; explanation: string; active: boolean; }
 export type QuizQuestion = Omit<Question, "correctIndex" | "explanation" | "active">;
-export interface Quiz { id: string; questions: QuizQuestion[]; }
+export interface Quiz { id: string; purpose: BreakPurpose; correctCount: number; question: QuizQuestion; questionToken: string; expiresAt: string; notice?: string; }
 export interface RosterStudent { id: string; firstName: string; lastName: string; username: string; enabled: boolean; registered: boolean; mustChangePassword: boolean; visitsToday: number; classroomId: string | null; }
-export interface StudentState { user: User; classroom: Classroom | null; currentVisit: Visit | null; activeCount: number; waitingCount: number; recentVisits: Visit[]; availableQuestions: number; canRequestPass: boolean; unavailableReason?: string; }
+export interface StudentState { user: User; classroom: Classroom | null; currentVisit: Visit | null; activeQuiz: Quiz | null; serverNow: string; activeCount: number; waitingCount: number; recentVisits: Visit[]; availableQuestions: number; canRequestPass: boolean; unavailableReason?: string; }
 export interface TeacherState { user: User; classes: Classroom[]; classroom: Classroom | null; students: RosterStudent[]; questions: Question[]; visits: Visit[]; stats: { out: number; ready: number; waiting: number; tripsToday: number; averageMinutes: number }; }
 export interface AuthState { user: User | null; setupAvailable?: boolean; adminProvisioned?: boolean; demo?: boolean; }
-export interface QuizResult { passed: boolean; correctCount: number; feedback: { questionId: string; correct: boolean; explanation: string }[]; visit?: Visit; }
+export interface QuizResult { passed: boolean; correctCount: number; feedback: { questionId: string; correct: boolean; explanation: string }[]; quiz?: Quiz; visit?: Visit; }
 export interface TeacherAccount { id: string; firstName: string; lastName: string; username: string; email: string | null; enabled: boolean; mustChangePassword: boolean; classCount: number; studentCount: number; createdAt: string; }
 export interface AdminStudent extends RosterStudent { classroomName: string | null; teacherId: string | null; teacherName: string | null; }
 export interface AdminState { user: User; teachers: TeacherAccount[]; classes: Classroom[]; students: AdminStudent[]; stats: { teachers: number; activeTeachers: number; inactiveTeachers: number; activeClasses: number; students: number; tripsToday: number; totalTrips: number; out: number; waiting: number }; }
@@ -22,7 +23,11 @@ export interface StudentDetail { student: RosterStudent; visits: Visit[]; }
 // POST /api/auth/signup {firstName,lastName,username?:string,password,classroomCode} -> {user}
 // POST /api/auth/logout -> {ok:true}; POST /api/auth/password {currentPassword,newPassword} -> {ok:true}
 // GET /api/student/state -> StudentState; POST /api/student/enroll {classroomCode} -> {ok:true} (only unenrolled accounts)
-// POST /api/student/quiz -> Quiz; POST /api/student/quiz/submit {quizId,answers:number[]} -> QuizResult
+// POST /api/student/quiz {purpose:'restroom'|'water'} -> Quiz (resumes a pending attempt)
+// POST /api/student/quiz/answer {quizId,questionId,questionToken,answer:number} -> QuizResult
+// POST /api/student/quiz/cancel {quizId} -> {ok:true}; legacy batch submit retired
+// POST /api/student/tutorial {} -> {ok:true} (save tutorial completion)
+// POST /api/student/visits/:id/warning {} -> {ok:true} (acknowledge own overdue active break)
 // POST /api/student/leave | return | cancel -> {ok:true}
 // GET /api/teacher/state?classroomId=optional -> TeacherState (default first active owned class; null if none)
 // POST /api/teacher/classes {name,period?:string,code:string} -> {classroom}

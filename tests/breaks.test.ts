@@ -1,7 +1,7 @@
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { createDatabase, type Database } from '../src/lib/db';
+import { createDatabase, type Database, type SQL } from '../src/lib/db';
 import { bootstrapAdministrator } from '../src/lib/bootstrap-admin';
 import { AppError, createSession, hashPassword, sessionUser, userFrom } from '../src/lib/auth';
 import { WaterCycle } from '../src/lib/domain';
@@ -260,6 +260,54 @@ describe('Sequential learning and fair student break reservations', { concurrenc
     assert.equal(cancelled.leftAt, null);
     assert.equal((await app.studentState(learners[3])).currentVisit?.status, 'ready');
     assert.deepEqual(await counts(), { reserved: 2, waiting: 0 });
+  });
+
+  it('returns a coherent queue snapshot when a concurrent return promotes the student mid-read', async () => {
+    const [first, second, waiting] = await Promise.all(['SnapshotOne', 'SnapshotTwo', 'SnapshotWaiting'].map(name => student(name)));
+    for (const learner of [first, second, waiting]) await qualify(learner);
+    let signalVisitRead!: () => void;
+    let releaseVisitRead!: () => void;
+    const visitRead = new Promise<void>(resolve => { signalVisitRead = resolve; });
+    const release = new Promise<void>(resolve => { releaseVisitRead = resolve; });
+    let protectedByTransaction = false;
+    let paused = false;
+    async function interceptedQuery<T>(connection: SQL, inTransaction: boolean, sql: string, params: unknown[] = []) {
+      const result = await connection.query<T>(sql, params);
+      if (!paused && params[0] === waiting.id && sql.includes('WHERE v.student_id=$1 AND (v.status')) {
+        paused = true;
+        protectedByTransaction = inTransaction;
+        signalVisitRead();
+        await release;
+      }
+      return result;
+    }
+    const instrumented: Database = {
+      query: <T>(sql: string, params?: unknown[]) => interceptedQuery<T>(db, false, sql, params),
+      transaction: <T>(callback: (tx: SQL) => Promise<T>) => db.transaction(tx => callback({ query: <R>(sql: string, params?: unknown[]) => interceptedQuery<R>(tx, true, sql, params) })),
+      close: () => db.close(),
+    };
+    const pendingSnapshot = new WaterCycle(instrumented).studentState(waiting);
+    await visitRead;
+    const returning = app.studentAction(first, 'return');
+    // In PGlite a held read transaction blocks the writer. An unprotected
+    // snapshot lets it finish between the visit read and queue-position read.
+    try {
+      if (!protectedByTransaction) await returning;
+    } finally {
+      releaseVisitRead();
+    }
+    const snapshot = await pendingSnapshot;
+    await returning;
+    assert.equal(snapshot.currentVisit?.status, 'waiting');
+    assert.equal(snapshot.currentVisit?.position, 1);
+    assert.equal(snapshot.currentVisit?.leftAt, null);
+    assert.equal(snapshot.activeCount, 2);
+    assert.equal(snapshot.waitingCount, 1);
+    const promoted = await app.studentState(waiting);
+    assert.equal(promoted.currentVisit?.status, 'ready');
+    assert.equal(promoted.currentVisit?.leftAt, null);
+    assert.equal(promoted.activeCount, 2);
+    assert.equal(promoted.waitingCount, 0);
   });
 
   it('reaps expired reservations through student, teacher, and administrator polling and keeps FIFO', async () => {

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { AdminState, Quiz, StudentState, TeacherState } from '../../src/lib/contracts';
+import type { AdminState, StudentState, TeacherState } from '../../src/lib/contracts';
+import { qualifyBreak } from './break-helpers';
 
 const origin = 'http://127.0.0.1:3100';
 const headers = { Origin: origin, 'Content-Type': 'application/json' };
@@ -24,9 +25,11 @@ async function signup(page: Page, firstName: string, lastName: string, code: str
   await page.getByLabel('First name', { exact: true }).fill(firstName);
   await page.getByLabel('Last name', { exact: true }).fill(lastName);
   await page.getByLabel('Classroom code', { exact: true }).fill(code);
+  await expect(page.getByLabel('Classroom code', { exact: true })).toHaveValue(code.toUpperCase());
   await page.getByLabel('Password', { exact: true }).fill('PrivateStudent2026!');
   await page.getByRole('button', { name: 'Create my account' }).click();
   await expect(page.getByRole('heading', { name: new RegExp(`Hey, ${firstName}`) })).toBeVisible();
+  await page.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
 }
 
 test('teacher class overview, leading-zero enrollment, duplicate errors, transfer, removal, and archived return', async ({ browser }) => {
@@ -45,30 +48,31 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     let dialog = teacher.getByRole('dialog');
     await dialog.getByLabel('Class name', { exact: true }).fill('Biology browser class');
     await dialog.getByLabel('Class period', { exact: true }).fill('9');
-    await dialog.getByLabel('Enrollment code', { exact: true }).fill('09009');
+    await dialog.getByLabel('Enrollment code', { exact: true }).fill('bio09');
+    await expect(dialog.getByLabel('Enrollment code', { exact: true })).toHaveValue('BIO09');
     await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
     await expect(dialog).not.toBeVisible();
     let card = teacher.getByRole('article').filter({ has: teacher.getByRole('heading', { name: 'Biology browser class', exact: true }) });
-    await expect(card.getByText('09009', { exact: true })).toBeVisible();
+    await expect(card.getByText('BIO09', { exact: true })).toBeVisible();
     await teacher.getByRole('button', { name: 'Create Class', exact: true }).click();
     dialog = teacher.getByRole('dialog');
     await dialog.getByLabel('Class name', { exact: true }).fill('Duplicate code test');
-    await dialog.getByLabel('Enrollment code', { exact: true }).fill('02001');
+    await dialog.getByLabel('Enrollment code', { exact: true }).fill('bIo09');
     await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText(/code|use|unique/i);
     await dialog.getByRole('button', { name: 'Close dialog' }).click();
     await card.getByRole('button', { name: 'Edit Class', exact: true }).click();
     dialog = teacher.getByRole('dialog');
     await dialog.getByLabel('Class name', { exact: true }).fill('Biology browser class updated');
-    await dialog.getByLabel('Enrollment code', { exact: true }).fill('09010');
+    await dialog.getByLabel('Enrollment code', { exact: true }).fill('bio10');
     await dialog.getByRole('button', { name: 'Save Class', exact: true }).click();
     card = teacher.getByRole('article').filter({ has: teacher.getByRole('heading', { name: 'Biology browser class updated', exact: true }) });
-    await expect(card.getByText('09010', { exact: true })).toBeVisible();
+    await expect(card.getByText('BIO10', { exact: true })).toBeVisible();
     const surname = `Enrollment${Date.now()}`;
-    await signup(student, 'Robin', surname, '09010');
+    await signup(student, 'Robin', surname, 'bio10');
     const username = `robin${surname}`.toLowerCase();
     let studentState = await (await student.request.get('/api/student/state')).json() as StudentState;
-    expect(studentState.classroom?.code).toBe('09010');
+    expect(studentState.classroom?.code).toBe('BIO10');
     await card.getByRole('button', { name: 'View Class', exact: true }).click();
     const row = teacher.getByRole('row').filter({ hasText: username });
     await expect(row).toBeVisible();
@@ -85,30 +89,26 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await teacher.getByRole('dialog').getByRole('button', { name: 'Remove from class', exact: true }).click();
     await expect(row).not.toBeVisible();
     await expect(student.getByRole('button', { name: /Join class/i })).toBeVisible();
-    await student.getByLabel('Class enrollment code', { exact: true }).fill('09010');
+    await student.getByLabel('Class enrollment code', { exact: true }).fill('bio10');
     await student.getByRole('button', { name: /Join class/i }).click();
-    await expect(student.getByRole('button', { name: 'Request a bathroom pass' })).toBeVisible();
+    await expect(student.getByRole('button', { name: 'Request a Break', exact: true })).toBeVisible();
     studentState = await (await student.request.get('/api/student/state')).json() as StudentState;
     const target = studentState.classroom!;
     const questions = (await (await teacher.request.get(`/api/teacher/state?classroomId=${target.id}`)).json() as TeacherState).questions;
-    const quizResponse = student.waitForResponse(r => r.url().endsWith('/api/student/quiz') && r.request().method() === 'POST');
-    await student.getByRole('button', { name: 'Request a bathroom pass' }).click();
-    const quiz = await (await quizResponse).json() as Quiz;
-    for (let i = 0; i < 2; i++) await student.locator('fieldset').nth(i).getByRole('radio').nth(questions.find(q => q.id === quiz.questions[i].id)!.correctIndex).check();
-    await student.getByRole('button', { name: 'Check my answers' }).click();
-    await student.getByRole('button', { name: "I'm leaving" }).click();
+    await qualifyBreak(student, questions, 'water');
     await teacher.getByRole('button', { name: 'Back to Class Roster' }).click();
     await card.getByRole('button', { name: 'Archive Class', exact: true }).click();
     await teacher.getByRole('dialog').getByRole('button', { name: 'Archive Class', exact: true }).click();
     await teacher.getByRole('tab', { name: /Archived classes/i }).click();
     await expect(card).toBeVisible();
-    await expect(student.getByRole('button', { name: "I'm back" })).toBeVisible();
-    await student.getByRole('button', { name: "I'm back" }).click();
-    await expect(student.getByRole('button', { name: 'Request a bathroom pass' })).toBeDisabled();
+    await expect(student.getByRole('button', { name: "I'm Back", exact: true })).toBeVisible();
+    await student.getByRole('button', { name: "I'm Back", exact: true }).click();
+    await expect(student.getByRole('button', { name: 'Request a Break', exact: true })).toBeDisabled();
     const returned = await (await student.request.get('/api/student/state')).json() as StudentState;
     expect(returned.recentVisits[0].classroomId).toBe(target.id);
     expect(returned.recentVisits[0].returnedAt).toBeTruthy();
-    const rejected = await teacher.request.post('/api/auth/signup', { headers, data: { firstName: 'Not', lastName: `Enrolled${Date.now()}`, password: 'Student2026!', classroomCode: '09010' } });
+    expect(returned.recentVisits[0].purpose).toBe('water');
+    const rejected = await teacher.request.post('/api/auth/signup', { headers, data: { firstName: 'Not', lastName: `Enrolled${Date.now()}`, password: 'Student2026!', classroomCode: 'bio10' } });
     expect(rejected.status()).toBe(400);
   } finally { await teacherContext.close(); await studentContext.close(); }
 });

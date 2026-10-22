@@ -24,6 +24,7 @@ export default function Home() {
   const [studentLastName, setStudentLastName] = useState("");
   const [registrationUsername, setRegistrationUsername] = useState("");
   const [customUsername, setCustomUsername] = useState(false);
+  const [classroomCode, setClassroomCode] = useState("");
   async function loadSession() {
     setLoading(true); setInitialError("");
     try {
@@ -45,7 +46,7 @@ export default function Home() {
   }
   function changeMode(next: Mode) {
     setMode(next); setError(""); setPassword("");
-    if (next === "signup") { setStudentFirstName(""); setStudentLastName(""); setRegistrationUsername(""); setCustomUsername(false); }
+    if (next === "signup") { setStudentFirstName(""); setStudentLastName(""); setRegistrationUsername(""); setCustomUsername(false); setClassroomCode(""); }
   }
   function updateStudentName(first: string, last: string) {
     setStudentFirstName(first); setStudentLastName(last);
@@ -80,7 +81,7 @@ export default function Home() {
         <div className="flow-illustration" aria-hidden="true">
           <div className="orbit orbit-one" /><div className="orbit orbit-two" />
           <div className="leaf-drawing"><Sprout size={107} strokeWidth={1.1} /></div>
-          <div className="float-card float-one"><span className="mini-icon"><BookOpen size={18} /></span><div><strong>Learn a little</strong><span>2 questions before you go</span></div><span className="float-check"><Check size={15} /></span></div>
+          <div className="float-card float-one"><span className="mini-icon"><BookOpen size={18} /></span><div><strong>Learn a little</strong><span>2 correct answers before you go</span></div><span className="float-check"><Check size={15} /></span></div>
           <div className="float-card float-two"><span className="mini-icon peach"><Users size={18} /></span><div><strong>A fair turn, every time</strong><span>Two passes. One simple queue.</span></div></div>
           <span className="illustration-caption">SMALL MOMENTS. GROWING MINDS.</span>
         </div>
@@ -98,7 +99,7 @@ export default function Home() {
         <form onSubmit={submit} className="auth-form">
           {mode !== "login" && <div className="form-grid"><label className="field">First name<input className="input" name="firstName" aria-label="First name" autoComplete="given-name" required maxLength={50} placeholder="Jamie" value={studentFirstName} onChange={e => updateStudentName(e.target.value, studentLastName)} /></label><label className="field">Last name<input className="input" name="lastName" aria-label="Last name" autoComplete="family-name" required maxLength={50} placeholder="Chen" value={studentLastName} onChange={e => updateStudentName(studentFirstName, e.target.value)} /></label></div>}
           {mode !== "signup" && <label className="field">Username<input className="input" aria-label="Username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required maxLength={100} placeholder={role === "student" ? "e.g. jamiechen" : "Your teacher username"} spellCheck={false} autoCapitalize="none" />{role === "student" && mode === "login" && <span className="field-hint">Your first + last name, with no spaces.</span>}</label>}
-          {mode === "signup" && <><label className="field">Username<input className="input" aria-label="Username" autoComplete="username" value={registrationUsername} onChange={e => { setCustomUsername(true); setRegistrationUsername(e.target.value.toLowerCase()); }} required minLength={2} maxLength={100} pattern="[a-z0-9]+" spellCheck={false} autoCapitalize="none" /><span className="field-hint">Your first + last name is suggested. Use letters and numbers.</span></label><label className="field">Classroom code<input className="input code-input" name="classroomCode" aria-label="Classroom code" autoComplete="off" required minLength={5} maxLength={5} pattern="[0-9]{5}" inputMode="numeric" placeholder="Five digits from your teacher" /><span className="field-hint">Your code enrolls you in the correct teacher’s class automatically.</span></label></>}
+          {mode === "signup" && <><label className="field">Username<input className="input" aria-label="Username" autoComplete="username" value={registrationUsername} onChange={e => { setCustomUsername(true); setRegistrationUsername(e.target.value.toLowerCase()); }} required minLength={2} maxLength={100} pattern="[a-z0-9]+" spellCheck={false} autoCapitalize="none" /><span className="field-hint">Your first + last name is suggested. Use letters and numbers.</span></label><label className="field">Classroom code<input className="input code-input" name="classroomCode" aria-label="Classroom code" autoComplete="off" required minLength={5} maxLength={5} pattern="[A-Za-z0-9]{5}" placeholder="Five letters or numbers" autoCapitalize="characters" spellCheck={false} value={classroomCode} onChange={e => setClassroomCode(e.target.value.toUpperCase())} /><span className="field-hint">Your code enrolls you in the correct teacher’s class automatically.</span></label></>}
           <label className="field">Password<input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "login" ? 1 : 8} maxLength={128} placeholder={mode === "login" ? "Enter your password" : "At least 8 characters"} /></label>
           {mode === "login" && <p className="password-help"><LockKeyhole size={13} /> {role === "student" ? "Forgot your password? Ask your teacher to reset it." : "Use the password you chose for your teacher account."}</p>}
           {error && <div className="alert error" role="alert">{error}</div>}

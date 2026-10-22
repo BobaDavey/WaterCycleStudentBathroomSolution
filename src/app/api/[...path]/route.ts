@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDatabase } from '@/lib/db';
 import { AppError, cookieName, createSession, digest, rateLimit, sessionUser } from '@/lib/auth';
-import { WaterCycle, adminProfileSchema, classCreateSchema, classUpdateSchema, enrollmentSchema, loginSchema, passwordSchema, questionSchema, requirePasswordChange, rosterSchema, rosterUpdateSchema, signupSchema, submitSchema, teacherCreateSchema, teacherUpdateSchema, transferSchema } from '@/lib/domain';
+import { WaterCycle, adminProfileSchema, classCreateSchema, classUpdateSchema, enrollmentSchema, loginSchema, passwordSchema, questionSchema, requirePasswordChange, rosterSchema, rosterUpdateSchema, signupSchema, teacherCreateSchema, teacherUpdateSchema, transferSchema } from '@/lib/domain';
 import type { User } from '@/lib/contracts';
 import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
 const ok = () => NextResponse.json({ok:true});
+const quizStartSchema = z.object({purpose:z.enum(['restroom','water'],{error:'Choose Use Restroom or Drink Water before continuing.'})});
+const answerSchema = z.object({quizId:z.string().uuid(),questionId:z.string().min(1).max(200),questionToken:z.string().uuid(),answer:z.number().int().min(0).max(3)});
+const quizCancelSchema = z.object({quizId:z.string().uuid()});
 function cookie(response: NextResponse, token:string, request:NextRequest) {
  response.cookies.set(cookieName,token,{httpOnly:true,secure:usesSecureCookie(request.headers.get('origin'),request.nextUrl.protocol,process.env.VERCEL==='1'),sameSite:'lax',path:'/',maxAge:7*86400});
  return response;
@@ -57,8 +60,12 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='admin/state'&&method==='GET')return NextResponse.json(await app.adminState(user));
   requirePasswordChange(user);
   if(route==='student/enroll'&&method==='POST'){await app.enrollStudent(user,enrollmentSchema.parse(await json()).classroomCode);return ok();}
-  if(route==='student/quiz'&&method==='POST'){await rateLimit(db,`quiz:${user.id}`,30);return NextResponse.json(await app.newQuiz(user));}
-  if(route==='student/quiz/submit'&&method==='POST'){const input=submitSchema.parse(await json());return NextResponse.json(await app.submitQuiz(user,input.quizId,input.answers));}
+  if(route==='student/quiz'&&method==='POST'){await rateLimit(db,`quiz:${user.id}`,30);const input=quizStartSchema.parse(await json());return NextResponse.json(await app.newQuiz(user,input.purpose));}
+  if(route==='student/quiz/answer'&&method==='POST')return NextResponse.json(await app.answerQuiz(user,answerSchema.parse(await json())));
+  if(route==='student/quiz/cancel'&&method==='POST'){await app.cancelQuiz(user,quizCancelSchema.parse(await json()).quizId);return ok();}
+  if(route==='student/quiz/submit')throw new AppError(410,'This learning screen has changed. Refresh the page to answer one question at a time.');
+  if(route==='student/tutorial'&&method==='POST'){await app.completeTutorial(user);return ok();}
+  if(path.length===4&&path[0]==='student'&&path[1]==='visits'&&path[3]==='warning'&&method==='POST'){await app.acknowledgeWarning(user,path[2]);return ok();}
   if(['student/leave','student/return','student/cancel'].includes(route)&&method==='POST'){await app.studentAction(user,path[1] as 'leave'|'return'|'cancel');return ok();}
   if(route==='teacher/classes'&&method==='POST')return NextResponse.json({classroom:await app.createClass(user,classCreateSchema.parse(await json()))});
   if(path.length===3&&path[0]==='teacher'&&path[1]==='classes'&&method==='PATCH')return NextResponse.json({classroom:await app.updateClass(user,path[2],classUpdateSchema.parse(await json()))});
@@ -88,8 +95,8 @@ async function handle(request:NextRequest, context:Context) {
   if(error instanceof AppError)return NextResponse.json({error:error.message},{status:error.status,headers:{'Cache-Control':'no-store'}});
   if(error instanceof z.ZodError)return NextResponse.json({error:error.issues[0]?.message||'Please check your entries.'},{status:400});
   const pg=error as {code?:string;constraint?:string};
-  if(pg.code==='23505')return NextResponse.json({error:pg.constraint?.includes('code')?'That five-digit enrollment code is already in use. Choose another code.':pg.constraint?.includes('admin')?'Only the single authorized administrator account can exist.':'That username is already registered, or that student already has an enrollment or pass.'},{status:409});
-  if(pg.code==='23514')return NextResponse.json({error:pg.constraint?.includes('code')?'Enrollment codes must contain exactly five digits.':'This change violates an account or classroom rule.'},{status:400});
+  if(pg.code==='23505')return NextResponse.json({error:pg.constraint?.includes('code')?'That five-character enrollment code is already in use. Choose another code.':pg.constraint?.includes('admin')?'Only the single authorized administrator account can exist.':'That username is already registered, or that student already has an enrollment or pass.'},{status:409});
+  if(pg.code==='23514')return NextResponse.json({error:pg.constraint?.includes('code')?'Enrollment codes must contain exactly five letters or numbers.':'This change violates an account or classroom rule.'},{status:400});
   console.error('WaterCycle request failed:',error instanceof Error?error.name:'unknown error');
   return NextResponse.json({error:'The server could not complete this request. Please try again or contact your teacher.'},{status:500});
  }
