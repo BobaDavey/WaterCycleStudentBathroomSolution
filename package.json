@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "admin:bootstrap": "node --env-file-if-exists=.env.local --import tsx scripts/bootstrap-admin.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.3.14",
