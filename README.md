@@ -2,6 +2,20 @@
 
 A biology check-in and bathroom-pass app for a classroom. Built with Next.js, React, TypeScript, and PostgreSQL. Ready to deploy to Vercel with a managed PostgreSQL database.
 
+## Preview in GitHub Codespaces
+
+Create a Codespace from this repository's **main** branch. The included dev container uses Node.js 24, installs the dependencies, prepares the local sample classroom, and forwards port **3000**.
+
+Once container setup finishes, run:
+
+```bash
+npm run dev
+```
+
+In the Codespaces **Ports** tab, open port **3000** in your browser. Choose **Fill teacher demo** or **Fill student demo**, then **Sign in**. These accounts use sample data, and the preview port can stay private. The forwarded Codespaces hostname is allowed automatically during development.
+
+If you already opened a Codespace before the app was pushed, pull the updated `main` branch and choose **Codespaces: Rebuild Container**, or create a new Codespace from `main`.
+
 ## What it does
 
 - Students create an account using their first name, last name, a classroom code, and a password. They sign in with `firstnamelastname` and their password.
@@ -19,7 +33,7 @@ A teacher and one classroom are supported per deployment. Twenty editable biolog
 Use Node.js **22 or newer** and npm. The repository's lockfile pins dependencies.
 
 ```bash
-npm ci
+npm install
 cp .env.example .env.local
 ```
 
@@ -94,4 +108,4 @@ Queue mutations hold a database row lock on the classroom. Both `ready` and `out
 
 Passwords use salted scrypt hashes. Sessions are random, stored hashed in the database, and sent through HttpOnly, SameSite cookies (Secure on HTTPS). Mutations enforce same-origin requests and validate input; teacher authorization is checked on every teacher operation. Login attempts are rate-limited, and exports neutralize spreadsheet formula cells. Keep PostgreSQL backups through your chosen provider.
 
-Git commits track the scaffold, student experience, teacher portal, backend, and verification work. No application code is automatically pushed or published.
+Git commits track the scaffold, student experience, teacher portal, backend, and verification work. Source files, dependency manifests, and configuration belong in Git; local databases, passwords, environment files, installed dependencies, and generated builds remain ignored.

@@ -1,0 +1,17 @@
+{
+  "name": "WaterCycle",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+  "containerEnv": {
+    "LOCAL_DATABASE": "true",
+    "DEMO_MODE": "true"
+  },
+  "postCreateCommand": "npm install && node scripts/setup-codespaces.mjs",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "WaterCycle",
+      "onAutoForward": "notify",
+      "protocol": "http"
+    }
+  }
+}
