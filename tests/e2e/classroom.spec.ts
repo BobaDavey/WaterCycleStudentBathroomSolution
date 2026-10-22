@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { Question, Quiz, StudentState, TeacherState } from '../../src/lib/contracts';
+import type { Question, Quiz, QuizResult, StudentState, TeacherState } from '../../src/lib/contracts';
 
 async function login(page: Page, username: string, password: string, teacher = false) {
   await page.goto('/');
@@ -10,17 +10,34 @@ async function login(page: Page, username: string, password: string, teacher = f
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }
 async function requestPass(page: Page, questions: Question[]) {
+  await page.getByRole('button', { name: 'Request a Break', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+  await page.getByRole('radio', { name: /Use Restroom/ }).check();
   const response = page.waitForResponse(r => r.url().endsWith('/api/student/quiz') && r.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Request a bathroom pass' }).click();
-  const quiz = await (await response).json() as Quiz;
-  expect(quiz.questions).toHaveLength(2);
-  expect(quiz.questions[0]).not.toHaveProperty('correctIndex');
-  expect(quiz.questions[0].id).not.toBe(quiz.questions[1].id);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  let quiz = await (await response).json() as Quiz;
+  expect(quiz.purpose).toBe('restroom');
+  expect(quiz.correctCount).toBe(0);
+  const seen = new Set<string>();
   for (let i = 0; i < 2; i++) {
-    const answer = questions.find(q => q.id === quiz.questions[i].id)!;
-    await page.locator('fieldset').nth(i).getByRole('radio').nth(answer.correctIndex).check();
+    expect(quiz.question).not.toHaveProperty('correctIndex');
+    expect(seen.has(quiz.question.id)).toBe(false);
+    seen.add(quiz.question.id);
+    await expect(page.getByText(`Correct Answers: ${i}/2`, { exact: true })).toBeVisible();
+    const answer = questions.find(q => q.id === quiz.question.id)!;
+    expect(answer).toBeTruthy();
+    await page.locator('fieldset').getByRole('radio').nth(answer.correctIndex).check();
+    const checked = page.waitForResponse(r => r.url().endsWith('/api/student/quiz/answer') && r.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Check Answer', exact: true }).click();
+    const result = await (await checked).json() as QuizResult;
+    expect(result.correctCount).toBe(i + 1);
+    expect(result.passed).toBe(i === 1);
+    if (i === 0) {
+      expect(result.visit).toBeUndefined();
+      expect(result.quiz).toBeTruthy();
+      quiz = result.quiz!;
+    }
   }
-  await page.getByRole('button', { name: 'Check my answers' }).click();
 }
 
 test('three students: quiz gate, two spaces, FIFO alert, departure and return records', async ({ browser }) => {
@@ -38,23 +55,39 @@ test('three students: quiz gate, two spaces, FIFO alert, departure and return re
     await login(third, 'sampatel', 'Biology2026!');
     expect((await first.request.get('/api/teacher/state')).status()).toBe(403);
     await requestPass(first, state.questions);
-    await expect(first.getByRole('heading', { name: "It's your turn!" })).toBeVisible();
-    await first.getByRole('button', { name: "I'm leaving" }).click();
-    await expect(first.getByRole('button', { name: "I'm back" })).toBeVisible();
+    await expect(first.getByRole('heading', { name: 'Your time is NOW, GRAB A PASS', exact: true })).toBeVisible();
+    await expect(first.getByRole('button', { name: "I'm Back", exact: true })).toBeVisible();
+    await expect(first.getByRole('button', { name: "I'm Leaving Now", exact: true })).toHaveCount(0);
+    const immediate = await (await first.request.get('/api/student/state')).json() as StudentState;
+    expect(immediate.currentVisit?.status).toBe('out');
+    expect(immediate.currentVisit?.leftAt).toBeTruthy();
+    expect(immediate.currentVisit?.purpose).toBe('restroom');
     await requestPass(second, state.questions);
-    await second.getByRole('button', { name: "I'm leaving" }).click();
+    await expect(second.getByRole('button', { name: "I'm Back", exact: true })).toBeVisible();
+    expect(((await (await second.request.get('/api/student/state')).json()) as StudentState).currentVisit?.leftAt).toBeTruthy();
     await requestPass(third, state.questions);
-    await expect(third.getByRole('heading', { name: 'Your break is on its way.' })).toBeVisible();
+    await expect(third.getByRole('heading', { name: "You're in line!", exact: true })).toBeVisible();
+    await expect(third.getByText('Your position: #1', { exact: true })).toBeVisible();
     const waiting = await (await third.request.get('/api/student/state')).json() as StudentState;
     expect(waiting.currentVisit?.position).toBe(1);
+    expect(waiting.currentVisit?.status).toBe('waiting');
+    expect(waiting.currentVisit?.leftAt).toBeNull();
     expect(waiting.activeCount).toBe(2);
     expect(waiting).not.toHaveProperty('students');
-    await first.getByRole('button', { name: "I'm back" }).click();
-    await expect(third.getByRole('heading', { name: "It's your turn!" })).toBeVisible();
+    await first.getByRole('button', { name: "I'm Back", exact: true }).click();
+    await expect(third.getByRole('heading', { name: "It's your turn! You're cleared to go.", exact: true })).toBeVisible();
     await expect(third).toHaveTitle(/your turn/i);
-    await third.getByRole('button', { name: "I'm leaving" }).click();
-    await third.getByRole('button', { name: "I'm back" }).click();
-    await second.getByRole('button', { name: "I'm back" }).click();
+    const reserved = await (await third.request.get('/api/student/state')).json() as StudentState;
+    expect(reserved.currentVisit?.status).toBe('ready');
+    expect(reserved.currentVisit?.leftAt).toBeNull();
+    expect(reserved.currentVisit?.readyExpiresAt).toBeTruthy();
+    expect(reserved.activeCount).toBe(2);
+    await third.getByRole('button', { name: "I'm Leaving Now", exact: true }).click();
+    const departed = await (await third.request.get('/api/student/state')).json() as StudentState;
+    expect(departed.currentVisit?.status).toBe('out');
+    expect(departed.currentVisit?.leftAt).toBeTruthy();
+    await third.getByRole('button', { name: "I'm Back", exact: true }).click();
+    await second.getByRole('button', { name: "I'm Back", exact: true }).click();
     const returned = await (await first.request.get('/api/student/state')).json() as StudentState;
     expect(returned.currentVisit).toBeNull();
     expect(returned.recentVisits[0].leftAt).toBeTruthy();
@@ -77,10 +110,15 @@ test('first-time student signup can sign back in using first+last username', asy
   await page.getByLabel('Password', { exact: true }).fill('MyBiology2026!');
   await page.getByRole('button', { name: 'Create my account' }).click();
   await expect(page.getByRole('heading', { name: /Hey, Robin/ })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Welcome to WaterCycle', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(((await (await page.request.get('/api/auth/me')).json()) as { user: { tutorialCompleted: boolean } }).user.tutorialCompleted).toBe(true);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
   await login(page, `robin${lastName}`.toLowerCase(), 'MyBiology2026!');
   await expect(page.getByRole('heading', { name: /Hey, Robin/ })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Welcome to WaterCycle', exact: true })).toHaveCount(0);
 });
 
 test('sign-in works on a narrow mobile screen without horizontal overflow', async ({ browser }) => {
@@ -88,7 +126,7 @@ test('sign-in works on a narrow mobile screen without horizontal overflow', asyn
   const page = await context.newPage();
   try {
     await login(page, 'jamiechen', 'Biology2026!');
-    await expect(page.getByRole('button', { name: 'Request a bathroom pass' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Request a Break', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   } finally { await context.close(); }
 });
@@ -122,6 +160,7 @@ test('teacher manages a roster account and question bank, then exports trip hist
       await claim.getByLabel('Password', { exact: true }).fill('FirstBiology2026!');
       await claim.getByRole('button', { name: 'Create my account' }).click();
       await expect(claim.getByRole('heading', { name: /Hey, Rosa/ })).toBeVisible();
+      await claim.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
     } finally { await claimContext.close(); }
     await student.getByRole('button', { name: /Reset password/i }).click();
     dialog = page.getByRole('dialog');
@@ -136,7 +175,7 @@ test('teacher manages a roster account and question bank, then exports trip hist
       await studentPage.getByLabel('Temporary password').fill('Temporary2026!');
       await studentPage.getByLabel('New password', { exact: true }).fill('MyOwnBiology2026!');
       await studentPage.getByRole('button', { name: 'Save new password' }).click();
-      await expect(studentPage.getByRole('button', { name: 'Request a bathroom pass' })).toBeVisible();
+      await expect(studentPage.getByRole('button', { name: 'Request a Break', exact: true })).toBeVisible();
     } finally { await studentContext.close(); }
     await page.getByRole('button', { name: 'Question bank', exact: true }).click();
     await page.getByRole('button', { name: 'Add question', exact: true }).click();
