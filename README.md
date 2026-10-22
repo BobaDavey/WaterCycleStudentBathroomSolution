@@ -39,6 +39,8 @@ npm run dev
 
 The seed command reads process environment variables, rather than Next.js's `.env.local` loader, so its `LOCAL_DATABASE=true` prefix is intentional. It refuses to run against `DATABASE_URL` and preserves an existing teacher. Local data lives in ignored `.local/data`; do not run multiple independent app processes against the same local database directory.
 
+See [local database safety](docs/local-database.md) for process locking and recovery guidance.
+
 The sign-in page offers **Fill teacher demo** and **Fill student demo** buttons when both local demo flags are enabled. Click **Sign in** after filling.
 
 | Role | Username | Password |
