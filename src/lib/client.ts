@@ -4,7 +4,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     headers: { "Content-Type": "application/json", ...options.headers },
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || "Something went wrong. Please try again.");
+  if (!response.ok) {
+    if (response.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event("watercycle:session-expired"));
+    throw new Error(body.error || "Something went wrong. Please try again.");
+  }
   return body as T;
 }
 export function post<T>(path: string, body?: unknown) {

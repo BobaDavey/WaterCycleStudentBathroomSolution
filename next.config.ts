@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   serverExternalPackages: ["@electric-sql/pglite", "pg"],
   poweredByHeader: false,
   async headers() {
