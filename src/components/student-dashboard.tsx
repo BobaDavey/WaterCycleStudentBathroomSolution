@@ -369,7 +369,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
         <li><div className={styles.tutorialStepTop}><CheckCircle2 size={27} strokeWidth={1.5} /><span>STEP 04</span></div><div><h3>Return to Class</h3><p>Return within 10 minutes and click &ldquo;I&apos;m Back&rdquo; when you return.</p></div></li>
       </ol>
       {dialogError && <p className={`alert error ${styles.dialogError}`} role="alert">{dialogError}</p>}
-      <button autoFocus className={`button primary ${styles.dialogAction}`} disabled={busy} onClick={() => void completeTutorial()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It! Let&apos;s Go<ArrowRight size={17} /></button>
+      <button className={`button primary ${styles.dialogAction}`} disabled={busy} onClick={() => void completeTutorial()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It! Let&apos;s Go<ArrowRight size={17} /></button>
     </StudentModal>}
     {showWarning && visit && <StudentModal labelledBy="warning-heading" describedBy="warning-copy" warning>
       <div className={`${styles.tutorialArt} ${styles.warningIcon}`}><TriangleAlert size={32} strokeWidth={1.5} /></div>
@@ -377,22 +377,45 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
       <p id="warning-copy" className={styles.warningCopy}>Bathroom breaks should last no longer than 10 minutes. If you exceed the 10-minute limit again, you may lose your break privileges for one month.</p>
       <div className={styles.warningTimer}><span>YOUR BREAK TIMER IS STILL RUNNING</span><strong>{elapsed(visit.leftAt, serverNow)}</strong></div>
       {dialogError && <p className={`alert error ${styles.dialogError}`} role="alert">{dialogError}</p>}
-      <div className={styles.warningActions}><button autoFocus className="button secondary" disabled={busy} onClick={() => void acknowledgeWarning()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It</button><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={17} />I&apos;m Back</button></div>
+      <div className={styles.warningActions}><button className="button secondary" disabled={busy} onClick={() => void acknowledgeWarning()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It</button><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={17} />I&apos;m Back</button></div>
     </StudentModal>}
   </div>;
 }
 
 function StudentModal({ children, labelledBy, describedBy, onDismiss, warning = false }: { children: React.ReactNode; labelledBy: string; describedBy?: string; onDismiss?: () => void; warning?: boolean }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  const dismiss = useRef(onDismiss);
+  useEffect(() => { dismiss.current = onDismiss; }, [onDismiss]);
   useEffect(() => {
     const element = dialog.current;
+    if (!element) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    element?.showModal();
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { element?.close(); document.body.style.overflow = originalOverflow; previousFocus?.focus(); };
+    const focusable = () => Array.from(element.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(node => node.getClientRects().length > 0);
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); dismiss.current?.(); return; }
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      const first = controls[0]; const last = controls.at(-1);
+      if (!first || !last) { event.preventDefault(); element.focus({ preventScroll: true }); return; }
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === element || !element.contains(active))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (active === last || active === element || !element.contains(active))) { event.preventDefault(); first.focus(); }
+    };
+    const containFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !element.contains(event.target)) element.focus({ preventScroll: true });
+    };
+    element.focus({ preventScroll: true });
+    document.addEventListener("keydown", keydown);
+    document.addEventListener("focusin", containFocus);
+    return () => {
+      document.removeEventListener("keydown", keydown); document.removeEventListener("focusin", containFocus);
+      document.body.style.overflow = originalOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
   }, []);
-  return <dialog ref={dialog} className={`modal ${styles.studentDialog} ${warning ? styles.warningDialog : ""}`} aria-labelledby={labelledBy} aria-describedby={describedBy} onCancel={event => { event.preventDefault(); onDismiss?.(); }}>{children}</dialog>;
+  return <div className="modal-backdrop"><section ref={dialog} className={`modal ${styles.studentDialog} ${warning ? styles.warningDialog : ""}`} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={labelledBy} aria-describedby={describedBy}>{children}</section></div>;
 }
 
 function HistoryTable({ visits }: { visits: Visit[] }) {

@@ -16,7 +16,8 @@
 .dateLabel { display: flex; align-items: center; gap: 8px; color: #77817a; font-size: 12px; }
 .alertToggle { white-space: nowrap; }
 .studentGrid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
-.mainColumn, .rightColumn { display: grid; gap: 24px; min-width: 0; }
+.mainColumn, .rightColumn { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; min-width: 0; }
+.recentCard { min-width: 0; }
 .hero { position: relative; overflow: hidden; background: #e9eddf; border: 1px solid #dce2d1; border-radius: 16px; min-height: 348px; padding: 34px; display: flex; align-items: center; }
 .heroCopy { position: relative; z-index: 1; max-width: 76%; }
 .heroPill { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 700; color: #586c46; letter-spacing: 1.3px; margin-bottom: 20px; }
@@ -107,8 +108,8 @@
 .helpModal ol { padding-left: 23px; display: grid; gap: 19px; line-height: 1.8; font-size: 13px; color: #748069; margin: 23px 0; }
 .helpModal ol strong { color: #3e5035; }
 @media (max-width: 1200px) { .studentGrid { grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; } .mainColumn, .rightColumn { gap: 18px; } .hero { padding: 27px; } .heroArt { opacity: .6; right: -85px; } .heroCopy { max-width: 94%; } .desktopBreak { display: none; } .capacityCard { padding: 19px; } .dateLabel { font-size: 10px; } }
-@media (max-width: 1020px) { .studentGrid { grid-template-columns: 1fr; } .rightColumn { grid-template-columns: 1fr 1fr; } .hero { min-height: 350px; } .heroArt { opacity: 1; right: -15px; } .heroCopy { max-width: 75%; } .desktopBadge { display: none !important; } }
-@media (max-width: 720px) { .classLabel, .sidebarNote, .profile, .brandSub { display: none; } .rightColumn { grid-template-columns: 1fr; } .stepsCard { display: none; } .dateLabel { display: none; } .hero { min-height: 330px; padding: 26px; } .hero h2 { font-size: 39px; } .heroCopy { max-width: 100%; } .heroArt { opacity: .3; right: -100px; } .hero p { max-width: 300px; } .heroPill { font-size: 8px; } .hero .heroFootnote { font-size: 9px; } .passCard { padding: 23px; } .passCard h2 { font-size: 32px; } .passId { display: none; } .passActions { gap: 8px; } .passActions > button { flex: 1 1 auto; } .quizCard { padding: 20px; } .footer { flex-wrap: wrap; gap: 12px; } .footer > :last-child { display: none; } .alertToggle > span { display: none; } .tripTimer output { font-size: 49px; } }
+@media (max-width: 1020px) { .studentGrid { grid-template-columns: minmax(0, 1fr); } .rightColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero { min-height: 350px; } .heroArt { opacity: 1; right: -15px; } .heroCopy { max-width: 75%; } .desktopBadge { display: none !important; } }
+@media (max-width: 720px) { .classLabel, .sidebarNote, .profile, .brandSub { display: none; } .rightColumn { grid-template-columns: minmax(0, 1fr); } .stepsCard { display: none; } .dateLabel { display: none; } .hero { min-height: 330px; padding: 26px; } .hero h2 { font-size: 39px; } .heroCopy { max-width: 100%; } .heroArt { opacity: .3; right: -100px; } .hero p { max-width: 300px; } .heroPill { font-size: 8px; } .hero .heroFootnote { font-size: 9px; } .passCard { padding: 23px; } .passCard h2 { font-size: 32px; } .passId { display: none; } .passActions { gap: 8px; } .passActions > button { flex: 1 1 auto; } .quizCard { padding: 20px; } .footer { flex-wrap: wrap; gap: 12px; } .footer > :last-child { display: none; } .alertToggle > span { display: none; } .tripTimer output { font-size: 49px; } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } .answer { transition: none; } }
 @media (min-width: 641px) and (max-height: 850px) { .sidebarNote { display: none; } .classLabel { margin-top: 0; padding-top: 18px; margin-bottom: 19px; } }
 .periodLabel { display: block; color: #839075; font-size: 10px; }
@@ -151,13 +152,14 @@
 .timeReminder > svg { flex-shrink: 0; margin-top: 2px; }
 .reservation { margin-top: 18px; padding: 12px 14px; border: 1px dashed #b7c9a6; border-radius: 9px; color: #60754f; font-size: 12px; line-height: 1.8; }
 .reservation strong { font-variant-numeric: tabular-nums; }
-.studentDialog { color: #465440; background: #fcfdf8; max-width: 660px; }
-.studentDialog::backdrop { background: #17392ed0; backdrop-filter: blur(4px); }
+.studentDialog { position: relative; margin: 0; width: 100%; max-width: 660px; max-height: calc(100dvh - 48px); min-width: 0; overflow: auto; overscroll-behavior: contain; color: #465440; background: #fcfdf8; }
+.studentDialog:focus { outline: none; }
 .studentDialog :global(.modal-header) { margin-bottom: 20px; }
+.studentDialog :global(.modal-header) > div { min-width: 0; }
 .studentDialog :global(.modal-header) h2 { font: 34px/1.15 Georgia, serif; color: #3c5035; margin-top: 9px; letter-spacing: -.8px; }
 .studentDialog :global(.modal-header) p { line-height: 1.7; font-size: 12px; margin-top: 10px; }
 .tutorialArt { display: inline-flex; align-items: center; justify-content: center; color: #789762; background: #eaf0df; border: 1px solid #dde6cf; border-radius: 15px; width: 60px; height: 60px; margin-bottom: 20px; }
-.tutorialSteps { list-style: none; padding: 0; margin: 0 0 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tutorialSteps { list-style: none; padding: 0; margin: 0 0 24px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .tutorialSteps > li { padding: 17px; border: 1px solid #e0e5d7; border-radius: 12px; background: #f4f6ed; }
 .tutorialStepTop { display: flex; align-items: center; justify-content: space-between; color: #75935e; margin-bottom: 12px; }
 .tutorialStepTop > span { font-size: 9px; letter-spacing: 1.2px; color: #94a083; }
@@ -179,5 +181,5 @@
 .enrollmentInfo > div:last-child { display: flex; align-items: flex-start; gap: 10px; border-top: 1px solid #e5e8df; padding-top: 18px; margin-top: 20px; }
 .enrollmentInfo > div:last-child > svg { flex-shrink: 0; color: #6d8858; }
 @media (max-width: 720px) { .enrollmentCard { padding: 24px; } .enrollmentCard h2 { font-size: 29px; } .enrollmentCard form { max-width: none; } }
-@media (max-width: 720px) { .purposeCard { padding: 23px; } .purposeCard h2 { font-size: 29px; } .purposeOptions { gap: 10px; } .purposeOption { padding: 21px 10px; } .purposeOption strong { font-size: 12px; } .purposeOption > span { width: 55px; height: 55px; } .quizCard :global(.card-header) { align-items: flex-start; flex-wrap: wrap; } .tutorialSteps { gap: 9px; } .tutorialSteps > li { padding: 13px; } .studentDialog :global(.modal-header) h2 { font-size: 29px; } .out .successHeading { font-size: 31px; } }
+@media (max-width: 720px) { .purposeCard { padding: 23px; } .purposeCard h2 { font-size: 29px; } .purposeOptions { gap: 10px; } .purposeOption { padding: 21px 10px; } .purposeOption strong { font-size: 12px; } .purposeOption > span { width: 55px; height: 55px; } .quizCard :global(.card-header) { align-items: flex-start; flex-wrap: wrap; } .tutorialSteps { gap: 9px; } .tutorialSteps > li { padding: 13px; } .studentDialog { max-height: calc(100dvh - 32px); } .studentDialog :global(.modal-header) h2 { font-size: 29px; } .out .successHeading { font-size: 31px; } }
 @media (max-width: 390px) { .tutorialSteps { grid-template-columns: 1fr; } .tutorialSteps > li { display: grid; grid-template-columns: 42px 1fr; gap: 10px; align-items: center; } .tutorialStepTop { display: grid; gap: 5px; margin: 0; } .warningActions { flex-direction: column; } }
