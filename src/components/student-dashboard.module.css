@@ -72,7 +72,7 @@
 .bigPassIcon { color: #658853; }
 .out { background: #e7eee9; border-color: #d1dfd4; }
 .tripTimer { display: flex; align-items: center; gap: 14px; color: #4b7057; }
-.tripTimer span { font: 58px/1.2 Georgia, serif; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.tripTimer output { font: 58px/1.2 Georgia, serif; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
 .quizCard { padding: 28px; }
 .quizCard :global(.card-header) { padding: 0; border: 0; margin-bottom: 15px; }
 .quizCard :global(.card-header) h2 { font: 29px/1.2 Georgia, serif; letter-spacing: -.7px; margin-top: 10px; }
@@ -108,7 +108,7 @@
 .helpModal ol strong { color: #3e5035; }
 @media (max-width: 1200px) { .studentGrid { grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; } .mainColumn, .rightColumn { gap: 18px; } .hero { padding: 27px; } .heroArt { opacity: .6; right: -85px; } .heroCopy { max-width: 94%; } .desktopBreak { display: none; } .capacityCard { padding: 19px; } .dateLabel { font-size: 10px; } }
 @media (max-width: 1020px) { .studentGrid { grid-template-columns: 1fr; } .rightColumn { grid-template-columns: 1fr 1fr; } .hero { min-height: 350px; } .heroArt { opacity: 1; right: -15px; } .heroCopy { max-width: 75%; } .desktopBadge { display: none !important; } }
-@media (max-width: 720px) { .classLabel, .sidebarNote, .profile, .brandSub { display: none; } .rightColumn { grid-template-columns: 1fr; } .stepsCard { display: none; } .dateLabel { display: none; } .hero { min-height: 330px; padding: 26px; } .hero h2 { font-size: 39px; } .heroCopy { max-width: 100%; } .heroArt { opacity: .3; right: -100px; } .hero p { max-width: 300px; } .heroPill { font-size: 8px; } .hero .heroFootnote { font-size: 9px; } .passCard { padding: 23px; } .passCard h2 { font-size: 32px; } .passId { display: none; } .passActions { gap: 8px; } .passActions > button { flex: 1 1 auto; } .quizCard { padding: 20px; } .footer { flex-wrap: wrap; gap: 12px; } .footer > :last-child { display: none; } .alertToggle > span { display: none; } .tripTimer span { font-size: 49px; } }
+@media (max-width: 720px) { .classLabel, .sidebarNote, .profile, .brandSub { display: none; } .rightColumn { grid-template-columns: 1fr; } .stepsCard { display: none; } .dateLabel { display: none; } .hero { min-height: 330px; padding: 26px; } .hero h2 { font-size: 39px; } .heroCopy { max-width: 100%; } .heroArt { opacity: .3; right: -100px; } .hero p { max-width: 300px; } .heroPill { font-size: 8px; } .hero .heroFootnote { font-size: 9px; } .passCard { padding: 23px; } .passCard h2 { font-size: 32px; } .passId { display: none; } .passActions { gap: 8px; } .passActions > button { flex: 1 1 auto; } .quizCard { padding: 20px; } .footer { flex-wrap: wrap; gap: 12px; } .footer > :last-child { display: none; } .alertToggle > span { display: none; } .tripTimer output { font-size: 49px; } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } .answer { transition: none; } }
 @media (min-width: 641px) and (max-height: 850px) { .sidebarNote { display: none; } .classLabel { margin-top: 0; padding-top: 18px; margin-bottom: 19px; } }
 .periodLabel { display: block; color: #839075; font-size: 10px; }
@@ -120,8 +120,64 @@
 .enrollmentCard form > button { justify-self: start; margin-top: 4px; }
 .codeInput { font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: 3px; }
 .codeInput::placeholder { letter-spacing: 1px; font-size: 14px; }
+.purposeCard { padding: 30px; }
+.purposeCard h2 { font: 34px/1.15 Georgia, serif; color: #3d4e37; letter-spacing: -.8px; margin: 12px 0; }
+.purposeCard > p { font-size: 12px; line-height: 1.8; }
+.purposeOptions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 25px 0; }
+.purposeFieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.purposeLegend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.purposeOption { position: relative; cursor: pointer; display: grid; justify-items: center; gap: 13px; padding: 25px 15px; border: 1px solid #e0e5d7; border-radius: 13px; background: #f8f9f3; color: #718263; text-align: center; }
+.purposeOption input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.purposeOption:has(input:focus-visible) { outline: 3px solid #8ea979; outline-offset: 3px; }
+.purposeOption > span { display: grid; place-items: center; width: 66px; height: 66px; border-radius: 50%; background: #eaf0e1; }
+.purposeOption strong { color: #4b6040; font-size: 14px; }
+.purposeOption small { font-size: 11px; color: #8c9682; }
+.purposeSelected { border-color: #8ca775; background: #edf3e6; box-shadow: 0 0 0 1px #8ca775; }
+.waterOption { background: #f2f7f5; color: #659082; }
+.waterOption > span { background: #e0eee8; }
+.waterOption.purposeSelected { background: #e8f2ed; }
+.purposeBadge { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid #cfdbc8; border-radius: 7px; color: #5a7450; background: #f7faf2a8; font-size: 11px; margin: 0 0 15px; }
+.progress { height: 6px; background: #e9ede2; border-radius: 10px; overflow: hidden; margin-top: 20px; }
+.progress > span { display: block; height: 100%; background: #83a56b; border-radius: inherit; transition: width .2s; }
+.quizProgress { white-space: normal; text-align: center; }
+.questionStatus { margin: 18px 0 0; }
+.questionStatus .feedback { display: flex; align-items: flex-start; gap: 9px; }
+.questionStatus svg { flex-shrink: 0; margin-top: 2px; }
+.learningNote { margin-top: 12px; font-size: 11px; color: #8a917e; line-height: 1.7; }
+.out .successHeading { font-size: clamp(30px, 3.1vw, 42px); max-width: 560px; line-height: 1.17; margin-bottom: 16px; }
+.out .returnReminder { color: #4a654e; font-weight: 600; font-size: 13px; margin-bottom: 22px; }
+.timerCaption { display: block; color: #7e8d7b; font-size: 10px; letter-spacing: .8px; margin: 7px 0 0 42px; }
+.timeReminder { margin-top: 21px; background: #fff5df; border: 1px solid #e9d8ad; border-radius: 9px; color: #8f6c35; padding: 12px 14px; display: flex; gap: 9px; align-items: flex-start; font-size: 12px; line-height: 1.7; }
+.timeReminder > svg { flex-shrink: 0; margin-top: 2px; }
+.reservation { margin-top: 18px; padding: 12px 14px; border: 1px dashed #b7c9a6; border-radius: 9px; color: #60754f; font-size: 12px; line-height: 1.8; }
+.reservation strong { font-variant-numeric: tabular-nums; }
+.studentDialog { color: #465440; background: #fcfdf8; max-width: 660px; }
+.studentDialog::backdrop { background: #17392ed0; backdrop-filter: blur(4px); }
+.studentDialog :global(.modal-header) { margin-bottom: 20px; }
+.studentDialog :global(.modal-header) h2 { font: 34px/1.15 Georgia, serif; color: #3c5035; margin-top: 9px; letter-spacing: -.8px; }
+.studentDialog :global(.modal-header) p { line-height: 1.7; font-size: 12px; margin-top: 10px; }
+.tutorialArt { display: inline-flex; align-items: center; justify-content: center; color: #789762; background: #eaf0df; border: 1px solid #dde6cf; border-radius: 15px; width: 60px; height: 60px; margin-bottom: 20px; }
+.tutorialSteps { list-style: none; padding: 0; margin: 0 0 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tutorialSteps > li { padding: 17px; border: 1px solid #e0e5d7; border-radius: 12px; background: #f4f6ed; }
+.tutorialStepTop { display: flex; align-items: center; justify-content: space-between; color: #75935e; margin-bottom: 12px; }
+.tutorialStepTop > span { font-size: 9px; letter-spacing: 1.2px; color: #94a083; }
+.tutorialSteps h3 { font-size: 12px; color: #49613e; margin-bottom: 7px; }
+.tutorialSteps p { font-size: 11px; line-height: 1.8; color: #7c8970; }
+.dialogAction { width: 100%; }
+.dialogError { margin-bottom: 15px; }
+.warningDialog { max-width: 540px; background: #fcfaf3; border-color: #e7d9b8; }
+.warningIcon { color: #ae8544; background: #f7edda; border-color: #eddfbf; }
+.warningDialog :global(.modal-header) h2 { color: #745d37; font-size: 32px; }
+.warningCopy { color: #8b7857; font-size: 13px; line-height: 1.9; }
+.warningTimer { display: grid; justify-items: center; padding: 22px 0; margin: 22px 0; border-block: 1px solid #e8dfcb; color: #987d4d; }
+.warningTimer > span { font-size: 10px; letter-spacing: 1px; }
+.warningTimer strong { font: 48px/1.25 Georgia, serif; font-variant-numeric: tabular-nums; margin-top: 8px; }
+.warningActions { display: flex; gap: 10px; }
+.warningActions > button { flex: 1; }
 .enrollmentInfo h2 { font-size: 17px; }
 .enrollmentInfo > p, .enrollmentInfo > div > p { font-size: 12px; color: #7b8770; line-height: 1.8; }
 .enrollmentInfo > div:last-child { display: flex; align-items: flex-start; gap: 10px; border-top: 1px solid #e5e8df; padding-top: 18px; margin-top: 20px; }
 .enrollmentInfo > div:last-child > svg { flex-shrink: 0; color: #6d8858; }
 @media (max-width: 720px) { .enrollmentCard { padding: 24px; } .enrollmentCard h2 { font-size: 29px; } .enrollmentCard form { max-width: none; } }
+@media (max-width: 720px) { .purposeCard { padding: 23px; } .purposeCard h2 { font-size: 29px; } .purposeOptions { gap: 10px; } .purposeOption { padding: 21px 10px; } .purposeOption strong { font-size: 12px; } .purposeOption > span { width: 55px; height: 55px; } .quizCard :global(.card-header) { align-items: flex-start; flex-wrap: wrap; } .tutorialSteps { gap: 9px; } .tutorialSteps > li { padding: 13px; } .studentDialog :global(.modal-header) h2 { font-size: 29px; } .out .successHeading { font-size: 31px; } }
+@media (max-width: 390px) { .tutorialSteps { grid-template-columns: 1fr; } .tutorialSteps > li { display: grid; grid-template-columns: 42px 1fr; gap: 10px; align-items: center; } .tutorialStepTop { display: grid; gap: 5px; margin: 0; } .warningActions { flex-direction: column; } }

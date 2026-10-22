@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Bell, BellRing, BookOpen, Check, CheckCircle2, ChevronRight, CircleHelp, Clock3, Droplets, Footprints, History, Home, Leaf, LoaderCircle, LogOut, ShieldCheck, Sparkles, Sprout, Timer, Users, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowRight, Bell, BellRing, BookOpen, Check, CheckCircle2, ChevronRight, CircleHelp, Clock3, Droplets, Footprints, History, Home, Leaf, LoaderCircle, LogOut, ShieldCheck, Sparkles, Sprout, Timer, Toilet, TriangleAlert, Users, Volume2, VolumeX, X } from "lucide-react";
 import { api, duration, post, time } from "@/lib/client";
-import type { Quiz, QuizResult, StudentState, User, Visit } from "@/lib/contracts";
+import type { BreakPurpose, Quiz, QuizResult, StudentState, User, Visit } from "@/lib/contracts";
 import styles from "./student-dashboard.module.css";
 
 function elapsed(start: string | null, now: number) {
@@ -12,6 +12,14 @@ function elapsed(start: string | null, now: number) {
   return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
 
+function remaining(deadline: string | null, now: number) {
+  if (!deadline) return "—";
+  const seconds = Math.max(0, Math.ceil((new Date(deadline).getTime() - now) / 1000));
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`;
+}
+
+function purposeName(purpose: BreakPurpose | null) { return purpose === "water" ? "Drink Water" : purpose === "restroom" ? "Restroom" : "Classroom Break"; }
+
 export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [state, setState] = useState<StudentState | null>(null);
   const [view, setView] = useState<"home" | "activity">("home");
@@ -19,30 +27,46 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   const [connectionError, setConnectionError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [choosingPurpose, setChoosingPurpose] = useState(false);
+  const [purpose, setPurpose] = useState<BreakPurpose | null>(null);
   const [quiz, setQuiz] = useState<Quiz | null>(null);
-  const [answers, setAnswers] = useState<number[]>([-1, -1]);
+  const [pendingQuiz, setPendingQuiz] = useState<Quiz | null>(null);
+  const [answer, setAnswer] = useState(-1);
   const [result, setResult] = useState<QuizResult | null>(null);
   const [sound, setSound] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState("");
   const [help, setHelp] = useState(false);
+  const [dialogError, setDialogError] = useState("");
+  const [tutorialCompleted, setTutorialCompleted] = useState(false);
+  const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Set<string>>(() => new Set());
   const [now, setNow] = useState(() => Date.now());
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [enrollmentCode, setEnrollmentCode] = useState("");
   const previousClassroom = useRef<string | null | undefined>(undefined);
   const previousStatus = useRef<string | null>(null);
+  const previousVisit = useRef<Visit | null>(null);
   const audio = useRef<AudioContext | null>(null);
   const soundEnabled = useRef(false);
   const notificationsEnabled = useRef(false);
+  const serverOffset = useRef(0);
+  const mutationEpoch = useRef(0);
+  const mutationPending = useRef(false);
+  const refreshSequence = useRef(0);
 
   const refresh = useCallback(async () => {
+    const epoch = mutationEpoch.current;
+    const sequence = ++refreshSequence.current;
     try {
       const data = await api<StudentState>("/student/state");
+      if (mutationPending.current || epoch !== mutationEpoch.current || sequence !== refreshSequence.current) return null;
+      const serverTime = Date.parse(data.serverNow);
+      if (Number.isFinite(serverTime)) serverOffset.current = serverTime - Date.now();
       setState(data);
       setConnectionError("");
       return data;
     } catch (err) {
-      setConnectionError(err instanceof Error ? err.message : "Could not connect to your classroom.");
+      if (epoch === mutationEpoch.current && sequence === refreshSequence.current && !mutationPending.current) setConnectionError(err instanceof Error ? err.message : "Could not connect to your classroom.");
       return null;
     }
   }, []);
@@ -66,16 +90,37 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
     const classroomId = state.classroom?.id ?? null;
     const changed = previousClassroom.current !== undefined && previousClassroom.current !== classroomId;
     if (changed || !state.canRequestPass) {
-      setQuiz(null); setResult(null); setAnswers([-1, -1]);
+      setQuiz(null); setPendingQuiz(null); setResult(null); setAnswer(-1); setChoosingPurpose(false); setPurpose(null);
     }
     if (changed) setMessage("Your class enrollment has changed. Your earlier activity is still available.");
     previousClassroom.current = classroomId;
   }, [state?.classroom?.id, state?.canRequestPass]);
   useEffect(() => {
     if (!state) return;
+    if (state.currentVisit || !state.canRequestPass || !state.activeQuiz) {
+      setQuiz(null); setPendingQuiz(null); setResult(null); setAnswer(-1);
+      if (state.currentVisit) setChoosingPurpose(false);
+      return;
+    }
+    setChoosingPurpose(false);
+    if (pendingQuiz?.questionToken === state.activeQuiz.questionToken) return;
+    if (quiz?.questionToken !== state.activeQuiz.questionToken) {
+      setQuiz(state.activeQuiz); setPendingQuiz(null); setPurpose(state.activeQuiz.purpose); setAnswer(-1); setResult(null);
+    }
+  // Synchronize only when a new server snapshot arrives, retaining answer feedback between polls.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+  useEffect(() => {
+    if (!state) return;
     const status = state.currentVisit?.status ?? null;
+    const prior = previousVisit.current;
+    if (prior?.status === "ready" && !state.currentVisit && prior.readyExpiresAt && Date.parse(prior.readyExpiresAt) <= Date.parse(state.serverNow)) {
+      setMessage("Your response window expired. Request a new break when you’re ready.");
+    } else if (prior && ["ready", "waiting"].includes(prior.status) && !state.currentVisit && state.recentVisits.some(item => item.id === prior.id && item.status === "cancelled")) {
+      setMessage("Your request has ended. Request a new break when you’re ready.");
+    }
     if (status === "ready" && previousStatus.current === "waiting") {
-      setMessage("It's your turn! A bathroom space is ready for you.");
+      setMessage("It's your turn! You're cleared to go.");
       if (soundEnabled.current && audio.current) {
         void audio.current.resume().then(() => {
           if (!audio.current) return;
@@ -93,23 +138,37 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
         }).catch(() => { /* The visible turn alert is always available. */ });
       }
       if (notificationsEnabled.current && "Notification" in window && Notification.permission === "granted") {
-        try { new Notification("WaterCycle · It's your turn", { body: "A bathroom space is ready. Open WaterCycle and tap I'm leaving." }); } catch { /* Browser support varies. */ }
+        try { new Notification("WaterCycle · It's your turn", { body: "You're cleared to go. Open WaterCycle and tap I'm Leaving Now." }); } catch { /* Browser support varies. */ }
       }
     }
     previousStatus.current = status;
+    previousVisit.current = state.currentVisit;
     document.title = status === "ready" ? "It's your turn! · WaterCycle" : status === "out" ? "Your pass is active · WaterCycle" : "Student home · WaterCycle";
   }, [state]);
 
   useEffect(() => () => { document.title = "WaterCycle"; void audio.current?.close(); }, []);
 
+  function beginMutation() {
+    mutationPending.current = true; mutationEpoch.current += 1; refreshSequence.current += 1;
+    setBusy(true); setError("");
+  }
+
+  async function finishMutation() {
+    mutationEpoch.current += 1; mutationPending.current = false;
+    await refresh(); setBusy(false);
+  }
+
   async function action(path: string, success?: string) {
-    setBusy(true); setError(""); setMessage("");
+    beginMutation(); setMessage(""); setDialogError("");
     try {
       await post(path);
-      await refresh();
       if (success) setMessage(success);
-    } catch (err) { setError(err instanceof Error ? err.message : "Please try again."); }
-    finally { setBusy(false); }
+    } catch (err) {
+      const notice = err instanceof Error ? err.message : "Please try again.";
+      setError(notice);
+      if (path === "/student/return") setDialogError(notice);
+    }
+    finally { await finishMutation(); }
   }
 
   async function startQuiz() {
@@ -117,28 +176,52 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
       setError(state?.unavailableReason || "Join an active class before requesting a pass.");
       return;
     }
-    setBusy(true); setError(""); setMessage("");
+    if (!purpose) return;
+    beginMutation(); setMessage("");
     try {
-      const data = await post<Quiz>("/student/quiz");
-      setQuiz(data); setAnswers(data.questions.map(() => -1)); setResult(null);
+      const data = await post<Quiz>("/student/quiz", { purpose });
+      setQuiz(data); setPendingQuiz(null); setAnswer(-1); setResult(null); setChoosingPurpose(false);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load questions."); }
-    finally { setBusy(false); }
+    finally { await finishMutation(); }
   }
 
   async function submitQuiz(event: React.FormEvent) {
     event.preventDefault();
-    if (!quiz || answers.some(answer => answer < 0)) return;
-    setBusy(true); setError("");
+    if (!quiz || answer < 0 || pendingQuiz || busy) return;
+    beginMutation();
     try {
-      const feedback = await post<QuizResult>("/student/quiz/submit", { quizId: quiz.id, answers });
+      const feedback = await post<QuizResult>("/student/quiz/answer", { quizId: quiz.id, questionId: quiz.question.id, questionToken: quiz.questionToken, answer });
       setResult(feedback);
       if (feedback.passed) {
-        setQuiz(null); setResult(null);
-        setMessage("Two for two! Your bathroom pass request is in.");
-        await refresh();
-      }
+        setQuiz(null); setPendingQuiz(null); setResult(null); setAnswer(-1);
+        setMessage(feedback.visit?.status === "out" ? "Correct Answers: 2/2. Your break has started." : "Correct Answers: 2/2. Your place in line is saved.");
+      } else if (feedback.quiz) setPendingQuiz(feedback.quiz);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not check your answers."); }
-    finally { setBusy(false); }
+    finally { await finishMutation(); }
+  }
+
+  async function cancelQuiz() {
+    if (!quiz) return;
+    beginMutation();
+    try { await post("/student/quiz/cancel", { quizId: quiz.id }); setQuiz(null); setPendingQuiz(null); setResult(null); setPurpose(null); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not cancel your learning check."); }
+    finally { await finishMutation(); }
+  }
+
+  async function completeTutorial() {
+    if (state?.user.tutorialCompleted || tutorialCompleted) { setHelp(false); return; }
+    beginMutation(); setDialogError("");
+    try { await post("/student/tutorial"); setTutorialCompleted(true); setHelp(false); }
+    catch (err) { setDialogError(err instanceof Error ? err.message : "Could not save your welcome guide. Please try again."); }
+    finally { await finishMutation(); }
+  }
+
+  async function acknowledgeWarning() {
+    if (!visit) return;
+    beginMutation(); setDialogError("");
+    try { await post(`/student/visits/${visit.id}/warning`); setAcknowledgedWarnings(previous => new Set(previous).add(visit.id)); }
+    catch (err) { setDialogError(err instanceof Error ? err.message : "Could not save your acknowledgement. Please try again."); }
+    finally { await finishMutation(); }
   }
 
   async function enableAlerts() {
@@ -159,28 +242,28 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   }
 
   async function changePassword(event: React.FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
+    event.preventDefault(); beginMutation();
     try {
       await post("/auth/password", { currentPassword, newPassword });
       setCurrentPassword(""); setNewPassword("");
-      await refresh(); setMessage("Your new password is saved.");
+      setMessage("Your new password is saved.");
     } catch (err) { setError(err instanceof Error ? err.message : "Could not change your password."); }
-    finally { setBusy(false); }
+    finally { await finishMutation(); }
   }
 
   async function enroll(event: React.FormEvent) {
     event.preventDefault();
-    if (!/^[0-9]{5}$/.test(enrollmentCode)) {
-      setError("Enter the five-digit code your teacher gave you.");
+    if (!/^[A-Z0-9]{5}$/.test(enrollmentCode)) {
+      setError("Enter the five-character code your teacher gave you. Use English letters and numbers.");
       return;
     }
-    setBusy(true); setError(""); setMessage("");
+    beginMutation(); setMessage("");
     try {
       await post("/student/enroll", { classroomCode: enrollmentCode });
       setEnrollmentCode(""); setQuiz(null); setResult(null);
-      await refresh(); setMessage("You’re enrolled. Your teacher’s classroom is ready for you.");
+      setMessage("You’re enrolled. Your teacher’s classroom is ready for you.");
     } catch (err) { setError(err instanceof Error ? err.message : "Could not join this class. Check the code with your teacher."); }
-    finally { setBusy(false); }
+    finally { await finishMutation(); }
   }
 
   const mustChangePassword = state ? state.user.mustChangePassword : user.mustChangePassword;
@@ -190,6 +273,10 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   const periodLabel = classroom?.period ? (/^period\b/i.test(classroom.period) ? classroom.period : `Period ${classroom.period}`) : "";
   const showPeriod = periodLabel && !classroom?.name.toLowerCase().includes(periodLabel.toLowerCase());
   const used = state?.activeCount ?? 0;
+  const serverNow = now + serverOffset.current;
+  const breakMilliseconds = visit?.status === "out" && visit.leftAt ? Math.max(0, serverNow - Date.parse(visit.leftAt)) : 0;
+  const showTutorial = !mustChangePassword && Boolean(state?.classroom) && !state?.user.tutorialCompleted && !tutorialCompleted;
+  const showWarning = visit?.status === "out" && breakMilliseconds > 12 * 60000 && !visit.warningAcknowledgedAt && !acknowledgedWarnings.has(visit.id);
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -198,7 +285,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
       <nav className="sidebar-nav" aria-label="Student navigation">
         <button className={`nav-item ${view === "home" ? "active" : ""}`} onClick={() => setView("home")}><Home size={19} /> My dashboard</button>
         <button className={`nav-item ${view === "activity" ? "active" : ""}`} onClick={() => setView("activity")}><History size={19} /> My activity</button>
-        <button className="nav-item" onClick={() => setHelp(true)}><CircleHelp size={19} /> How it works</button>
+        <button className="nav-item" onClick={() => { setDialogError(""); setHelp(true); }}><CircleHelp size={19} /> How Breaks Work</button>
       </nav>
       <div className={styles.sidebarNote}><Leaf size={25} /><strong>Small questions.<br />Growing minds.</strong><p>A little biology before a little break.</p></div>
       <div className="sidebar-bottom"><div className={styles.profile}><span className="avatar">{user.firstName[0]}{user.lastName[0]}</span><div><strong>{user.firstName} {user.lastName}</strong><span>Student account</span></div></div><button className="nav-item" onClick={onLogout}><LogOut size={18} /> Sign out</button></div>
@@ -217,32 +304,99 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
               : <>
                 <div className={styles.studentGrid}>
                   <div className={styles.mainColumn}>
-                    {visit ? <section className={`${styles.passCard} ${styles[visit.status]}`} aria-live="polite">
-                      <div className={styles.passCardTop}><span className={styles.passTag}>{visit.status === "waiting" ? <Users size={16} /> : visit.status === "ready" ? <BellRing size={16} /> : <Footprints size={16} />}{visit.status === "waiting" ? "IN THE QUEUE" : visit.status === "ready" ? "YOUR TURN IS HERE" : "PASS IN PROGRESS"}</span><span className={styles.passId}>BATHROOM PASS</span></div>
-                      {visit.status === "waiting" ? <><div className={styles.queueNumber}>{visit.position ?? "—"}<span>in line</span></div><h2>Your break is on its way.</h2><p>You&apos;re in the queue. We&apos;ll let you know as soon as a space opens. Keep this page open.</p><div className={styles.passActions}><button className="button secondary" onClick={() => void enableAlerts()}>{sound ? <Volume2 size={17} /> : <Bell size={17} />}{sound ? "Turn alerts off" : "Enable turn alerts"}</button><button className="button ghost" disabled={busy} onClick={() => void action("/student/cancel", "Your request was cancelled.")}>Leave the queue</button></div></>
-                        : visit.status === "ready" ? <><div className={styles.bigPassIcon}><CheckCircle2 size={46} strokeWidth={1.4} /></div><h2>It&apos;s your turn!</h2><p>A space is reserved for you. Tap below when you&apos;re actually heading out so your time is recorded correctly.</p><div className={styles.passActions}><button className="button primary" disabled={busy || !state.canRequestPass} onClick={() => void action("/student/leave")}><Footprints size={18} />I&apos;m leaving<ArrowRight size={17} /></button><button className="button ghost" disabled={busy} onClick={() => void action("/student/cancel", "Your pass was cancelled. The next student can go.")}>Cancel my pass</button></div></>
-                          : <><div className={styles.tripTimer}><Timer size={28} /><span>{elapsed(visit.leftAt, now)}</span></div><h2>Enjoy your little break.</h2><p>You left at {time(visit.leftAt)}. Remember to check in when you return to the classroom.</p><div className={styles.passActions}><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={19} />I&apos;m back<ArrowRight size={17} /></button></div></>}
-                    </section> : !classroom ? <section className={`card ${styles.enrollmentCard}`}><div className={styles.circleIcon}><Users size={27} /></div><p className="eyebrow">FIND YOUR CLASSROOM</p><h2>Join a class to get started.</h2><p className="muted">Your account and past activity are safe. Enter your teacher’s five-digit code to join the right class automatically.</p><form onSubmit={enroll}><label className="field">Class enrollment code<input className={`input ${styles.codeInput}`} aria-label="Class enrollment code" aria-describedby="enrollment-code-help" inputMode="numeric" pattern="[0-9]{5}" minLength={5} maxLength={5} autoComplete="off" required placeholder="e.g. 01001" value={enrollmentCode} onChange={event => setEnrollmentCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 5))} /></label><p id="enrollment-code-help" className="field-hint">Use all five digits, including any zeros at the beginning.</p><button className="button primary" disabled={busy || enrollmentCode.length !== 5}>{busy ? <LoaderCircle className={styles.spin} size={18} /> : <Users size={18} />}Join class<ArrowRight size={18} /></button></form></section> : quiz ? <section className={`card ${styles.quizCard}`}><div className="card-header"><div><p className="eyebrow">YOUR TWO-QUESTION CHECK-IN</p><h2>A moment for biology.</h2></div><span className="badge green"><BookOpen size={14} />{answers.filter(answer => answer >= 0).length} / {quiz.questions.length}</span></div><p className="muted">Answer both questions correctly to request your pass. You can try again if you miss one.</p><form onSubmit={submitQuiz}>{quiz.questions.map((question, index) => {
-                      const feedback = result?.feedback.find(item => item.questionId === question.id);
-                      return <fieldset key={question.id} className={styles.question} disabled={busy || Boolean(result)}><legend><span className={styles.questionNumber}>{index + 1}</span><span>{question.prompt}</span></legend><span className={`badge gray ${styles.topic}`}>{question.topic}</span><div className={styles.answers}>{question.options.map((option, optionIndex) => <label key={optionIndex} className={`${styles.answer} ${answers[index] === optionIndex ? styles.selectedAnswer : ""}`}><input type="radio" name={`answer-${question.id}`} value={optionIndex} checked={answers[index] === optionIndex} onChange={() => setAnswers(previous => previous.map((answer, answerIndex) => answerIndex === index ? optionIndex : answer))} required /><span className={styles.optionLetter}>{String.fromCharCode(65 + optionIndex)}</span><span>{option}</span>{answers[index] === optionIndex && <Check size={17} />}</label>)}</div>{feedback && <p className={`${styles.feedback} ${feedback.correct ? styles.correct : styles.incorrect}`}><strong>{feedback.correct ? "That's right. " : "Not quite. "}</strong>{feedback.explanation}</p>}</fieldset>;
-                    })}{result ? <div className={styles.quizFooter}><p className="muted">{result.correctCount} of 2 correct. A fresh pair is waiting for you.</p><button type="button" className="button primary" disabled={busy} onClick={() => void startQuiz()}>Try two new questions<ArrowRight size={17} /></button></div> : <div className={styles.quizFooter}><button type="button" className="button ghost" disabled={busy} onClick={() => { setQuiz(null); setResult(null); }}>Come back later</button><button className="button primary" disabled={busy || answers.some(answer => answer < 0)}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <CheckCircle2 size={17} />}Check my answers</button></div>}</form></section> : <section className={styles.hero}><div className={styles.heroCopy}><span className={styles.heroPill}><Sparkles size={14} />A BRAIN BREAK STARTS HERE</span><h2>Ready for a<br />little break?</h2><p>Two biology questions, then you&apos;re on your way.<br className={styles.desktopBreak} /> Let&apos;s keep our classroom flowing.</p><button className="button primary" disabled={busy || !state.canRequestPass || state.availableQuestions < 2} onClick={() => void startQuiz()}>{busy ? <LoaderCircle size={18} className={styles.spin} /> : <BookOpen size={18} />}Request a bathroom pass<ArrowRight size={18} /></button>{state.canRequestPass && state.availableQuestions < 2 && <p className={styles.unavailable}>Your teacher needs to add at least two active questions before you can request a pass.</p>}<div className={styles.heroFootnote}><ShieldCheck size={15} />Your time starts only when you tap &ldquo;I&apos;m leaving.&rdquo;</div></div><div className={styles.heroArt} aria-hidden="true"><div className={styles.orbitOne} /><div className={styles.orbitTwo} /><div className={styles.plant}><Sprout size={144} strokeWidth={1.2} /></div><span className={styles.artSpark}>✦</span><span className={styles.artLeaf}><Leaf size={25} /></span><span className={styles.artLabel}>ROOM TO GROW</span></div></section>}
+                    {visit ? <section className={`${styles.passCard} ${styles[visit.status]}`}>
+                      <div className={styles.passCardTop}><span className={styles.passTag}>{visit.status === "waiting" ? <Users size={16} /> : visit.status === "ready" ? <BellRing size={16} /> : <Footprints size={16} />}{visit.status === "waiting" ? "IN THE QUEUE" : visit.status === "ready" ? "YOUR TURN IS HERE" : "CURRENTLY ON BREAK"}</span><span className={styles.passId}>CLASSROOM BREAK</span></div>
+                      <span className={styles.purposeBadge}>{visit.purpose === "water" ? <Droplets size={15} /> : <Toilet size={15} />}{purposeName(visit.purpose)}</span>
+                      {visit.status === "waiting" ? <>
+                        <h2 aria-live="polite">You&apos;re in line!</h2>
+                        <div className={styles.queueNumber}><span>Your position:</span> #{visit.position ?? "—"}</div>
+                        <p>We&apos;ll notify you here when a space opens. Keep this page open. Your break timer hasn&apos;t started.</p>
+                        <div className={styles.passActions}><button className="button secondary" onClick={() => void enableAlerts()}>{sound ? <Volume2 size={17} /> : <Bell size={17} />}{sound ? "Turn alerts off" : "Enable turn alerts"}</button><button className="button ghost" disabled={busy} onClick={() => void action("/student/cancel", "Your request was cancelled.")}>Cancel Request</button></div>
+                      </> : visit.status === "ready" ? <>
+                        <div className={styles.bigPassIcon}><CheckCircle2 size={46} strokeWidth={1.4} /></div>
+                        <h2 aria-live="polite">It&apos;s your turn! You&apos;re cleared to go.</h2>
+                        <p>Your space is reserved. Your timer starts when you tap &ldquo;I&apos;m Leaving Now.&rdquo;</p>
+                        {visit.readyExpiresAt && <div className={styles.reservation}><Clock3 size={15} /> You have 2 minutes to respond. <strong>{remaining(visit.readyExpiresAt, serverNow)}</strong> remaining to keep your turn. If you miss this window, the space goes to the next student.</div>}
+                        <div className={styles.passActions}><button className="button primary" disabled={busy || !state.canRequestPass || Boolean(visit.readyExpiresAt && Date.parse(visit.readyExpiresAt) <= serverNow)} onClick={() => void action("/student/leave")}><Footprints size={18} />I&apos;m Leaving Now<ArrowRight size={17} /></button><button className="button ghost" disabled={busy} onClick={() => void action("/student/cancel", "Your pass was cancelled. The next student can go.")}>Cancel Request</button></div>
+                      </> : <>
+                        <h2 className={styles.successHeading} aria-live="polite">Your time is NOW, GRAB A PASS</h2>
+                        <p className={styles.returnReminder}>Remember: You must return to class within 10 minutes.</p>
+                        <div className={styles.tripTimer}><Timer size={28} /><output aria-label="Elapsed break time" aria-live="off">{elapsed(visit.leftAt, serverNow)}</output></div>
+                        <span className={styles.timerCaption}>ELAPSED BREAK TIME · STARTED {time(visit.leftAt)}</span>
+                        {breakMilliseconds >= 10 * 60000 && <div className={styles.timeReminder} role="status"><Clock3 size={18} /><span>You&apos;ve reached the 10-minute limit. Please return to class and click &ldquo;I&apos;m Back.&rdquo;</span></div>}
+                        <div className={styles.passActions}><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={19} />I&apos;m Back<ArrowRight size={17} /></button></div>
+                      </>}
+                    </section> : !classroom ? <section className={`card ${styles.enrollmentCard}`}>
+                      <div className={styles.circleIcon}><Users size={27} /></div><p className="eyebrow">FIND YOUR CLASSROOM</p><h2>Join a class to get started.</h2><p className="muted">Your account and past activity are safe. Enter your teacher’s five-character code to join the right class automatically.</p>
+                      <form onSubmit={enroll}><label className="field">Class enrollment code<input className={`input ${styles.codeInput}`} aria-label="Class enrollment code" aria-describedby="enrollment-code-help" pattern="[A-Za-z0-9]{5}" minLength={5} maxLength={5} autoComplete="off" autoCapitalize="characters" spellCheck={false} required placeholder="e.g. BIO01" value={enrollmentCode} onChange={event => setEnrollmentCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))} /></label><p id="enrollment-code-help" className="field-hint">Use five English letters or numbers, including any zeros at the beginning.</p><button className="button primary" disabled={busy || enrollmentCode.length !== 5}>{busy ? <LoaderCircle className={styles.spin} size={18} /> : <Users size={18} />}Join class<ArrowRight size={18} /></button></form>
+                    </section> : quiz ? <section className={`card ${styles.quizCard}`}>
+                      <div className="card-header"><div><p className="eyebrow">A QUICK LEARNING</p><h2>A moment for biology.</h2></div><span className={`badge green ${styles.quizProgress}`} role="status"><BookOpen size={14} />Correct Answers: {result?.correctCount ?? quiz.correctCount}/2</span></div>
+                      <span className={styles.purposeBadge}>{quiz.purpose === "water" ? <Droplets size={15} /> : <Toilet size={15} />}{purposeName(quiz.purpose)}</span>
+                      <p className="muted">Get two answers right in total. Every correct answer counts, even if you miss one along the way.</p>
+                      <div className={styles.progress} role="progressbar" aria-label="Correct answers" aria-valuemin={0} aria-valuemax={2} aria-valuenow={result?.correctCount ?? quiz.correctCount}><span style={{ width: `${(result?.correctCount ?? quiz.correctCount) * 50}%` }} /></div>
+                      {result?.feedback[0] && <div className={styles.questionStatus} role="status"><p className={`${styles.feedback} ${result.feedback[0].correct ? styles.correct : styles.incorrect}`}>{result.feedback[0].correct ? <CheckCircle2 size={17} /> : <Sprout size={17} />}<span><strong>{result.feedback[0].correct ? "Nice work! " : "Keep going! "}</strong>{result.feedback[0].correct ? "One step closer. " : "Your correct answers are saved. "}{result.feedback[0].explanation}</span></p></div>}
+                      {quiz.notice && <p className={styles.learningNote}>{quiz.notice}</p>}
+                      <form onSubmit={submitQuiz}>
+                        <fieldset key={quiz.questionToken} className={styles.question} disabled={busy || Boolean(pendingQuiz)}><legend><span className={styles.questionNumber}><Leaf size={14} /></span><span>{quiz.question.prompt}</span></legend><span className={`badge gray ${styles.topic}`}>{quiz.question.topic}</span><div className={styles.answers}>{quiz.question.options.map((option, optionIndex) => <label key={optionIndex} className={`${styles.answer} ${answer === optionIndex ? styles.selectedAnswer : ""}`}><input type="radio" name={`answer-${quiz.questionToken}`} value={optionIndex} checked={answer === optionIndex} onChange={() => setAnswer(optionIndex)} required /><span className={styles.optionLetter}>{String.fromCharCode(65 + optionIndex)}</span><span>{option}</span>{answer === optionIndex && <Check size={17} />}</label>)}</div></fieldset>
+                        <div className={styles.quizFooter}><button type="button" className="button ghost" disabled={busy} onClick={() => void cancelQuiz()}>Cancel learning check</button>{pendingQuiz ? <button key="next-question" type="button" className="button primary" disabled={busy} onClick={() => { setQuiz(pendingQuiz); setPendingQuiz(null); setAnswer(-1); setResult(null); }}>Next question<ArrowRight size={17} /></button> : <button key="check-answer" type="submit" className="button primary" disabled={busy || answer < 0}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <CheckCircle2 size={17} />}Check my answer</button>}</div>
+                      </form>
+                    </section> : choosingPurpose ? <section className={`card ${styles.purposeCard}`}>
+                      <p className="eyebrow">FIRST, A LITTLE DIRECTION</p><h2>What kind of break?</h2><p className="muted">Choose your purpose, then give your brain a quick biology moment.</p>
+                      <fieldset className={styles.purposeFieldset} disabled={busy}><legend className={styles.purposeLegend}>Choose a break purpose</legend><div className={styles.purposeOptions}>
+                        <label className={`${styles.purposeOption} ${purpose === "restroom" ? styles.purposeSelected : ""}`}><input type="radio" name="break-purpose" aria-label="Use Restroom" value="restroom" checked={purpose === "restroom"} onChange={() => setPurpose("restroom")} /><span><Toilet size={34} strokeWidth={1.5} /></span><strong>Use Restroom</strong><small>A quick restroom break</small></label>
+                        <label className={`${styles.purposeOption} ${styles.waterOption} ${purpose === "water" ? styles.purposeSelected : ""}`}><input type="radio" name="break-purpose" aria-label="Drink Water" value="water" checked={purpose === "water"} onChange={() => setPurpose("water")} /><span><Droplets size={34} strokeWidth={1.5} /></span><strong>Drink Water</strong><small>A moment to refresh</small></label>
+                      </div></fieldset>
+                      <div className={styles.quizFooter}><button type="button" className="button ghost" disabled={busy} onClick={() => { setChoosingPurpose(false); setPurpose(null); }}>Back to dashboard</button><button className="button primary" disabled={busy || !purpose || !state.canRequestPass} onClick={() => void startQuiz()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <BookOpen size={17} />}Continue<ArrowRight size={17} /></button></div>
+                    </section> : <section className={styles.hero}><div className={styles.heroCopy}><span className={styles.heroPill}><Sparkles size={14} />A BRAIN BREAK STARTS HERE</span><h2>Ready for a<br />little break?</h2><p>A quick learning, then a little breathing room.<br className={styles.desktopBreak} /> Let&apos;s keep our classroom flowing.</p><button className="button primary" disabled={busy || !state.canRequestPass || state.availableQuestions < 2} onClick={() => { setChoosingPurpose(true); setPurpose(null); setError(""); }}>{busy ? <LoaderCircle size={18} className={styles.spin} /> : <BookOpen size={18} />}Request a Break<ArrowRight size={18} /></button>{state.canRequestPass && state.availableQuestions < 2 && <p className={styles.unavailable}>Your teacher needs to add at least two active questions before you can request a break.</p>}<div className={styles.heroFootnote}><ShieldCheck size={15} />Two correct answers. A fair turn. Back in 10 minutes.</div></div><div className={styles.heroArt} aria-hidden="true"><div className={styles.orbitOne} /><div className={styles.orbitTwo} /><div className={styles.plant}><Sprout size={144} strokeWidth={1.2} /></div><span className={styles.artSpark}>✦</span><span className={styles.artLeaf}><Leaf size={25} /></span><span className={styles.artLabel}>ROOM TO GROW</span></div></section>}
                     <section className={`card ${styles.recentCard}`}><div className="card-header"><div><h2>Your recent activity</h2><p className="muted">A quick look at your last few breaks.</p></div><button className="button ghost small" onClick={() => setView("activity")}>View all<ArrowRight size={15} /></button></div><HistoryTable visits={history.slice(0, 3)} /></section>
                   </div>
                   <aside className={styles.rightColumn}>
                     {classroom ? <section className={`card ${styles.capacityCard}`}><div className="card-header"><h2>Classroom flow</h2><span className={styles.liveLabel}><span className={styles.liveDot} />LIVE</span></div><p className="muted">A maximum of {capacity} students at a time keeps things moving.</p><div className={styles.capacitySlots}>{Array.from({ length: capacity }, (_, index) => <div key={index} className={`${styles.capacitySlot} ${index < used ? styles.slotUsed : ""}`}><div><Footprints size={24} strokeWidth={1.6} /></div><strong>{index < used ? "In use" : "Available"}</strong><span>Space {index + 1}</span></div>)}</div><div className={styles.queueSummary}><Users size={17} /><span>{state.waitingCount === 0 ? "No one is waiting" : `${state.waitingCount} ${state.waitingCount === 1 ? "student" : "students"} in the queue`}</span></div><p className={styles.capacityNote}>Spaces include students getting ready to leave.</p></section> : <section className={`card ${styles.enrollmentInfo}`}><div className="card-header"><h2>A place for your learning.</h2><Sprout size={24} /></div><p>Each teacher’s code connects you to a specific class period. You won’t need to choose a teacher or class yourself.</p><div><ShieldCheck size={19} /><p>Your existing account and previous trip records stay with you when your enrollment changes.</p></div></section>}
-                    <section className={styles.stepsCard}><span className="eyebrow">A GOOD FLOW, IN THREE STEPS</span><h2>Think. Go. Grow.</h2><ol><li><span>01</span><div><strong>Give your brain a moment</strong><p>Answer two random biology questions correctly.</p></div></li><li><span>02</span><div><strong>Wait for your green light</strong><p>Join the line if both spaces are taken. We&apos;ll signal your turn.</p></div></li><li><span>03</span><div><strong>Check out, then check in</strong><p>Tap when you leave and when you&apos;re back. That&apos;s it.</p></div></li></ol></section>
+                    <section className={styles.stepsCard}><span className="eyebrow">A GOOD FLOW, IN THREE STEPS</span><h2>Think. Go. Grow.</h2><ol><li><span>01</span><div><strong>Give your brain a moment</strong><p>Choose your break purpose. Get two biology answers right in total.</p></div></li><li><span>02</span><div><strong>Wait for your green light</strong><p>Your timer starts if a space is open. Otherwise, join the line and watch for your turn.</p></div></li><li><span>03</span><div><strong>Return within 10 minutes</strong><p>Click &ldquo;I&apos;m Back&rdquo; when you return so the next student can go.</p></div></li></ol></section>
                   </aside>
                 </div>
                 <footer className={styles.footer}><span><Droplets size={15} />A little structure. A lot more learning.</span><span>Made for your classroom.</span></footer>
               </>}
       </div>
     </main>
-    {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><section className={`modal ${styles.helpModal}`} role="dialog" aria-modal="true" aria-labelledby="help-heading" onClick={event => event.stopPropagation()}><div className="modal-header"><h2 id="help-heading">Your pass, step by step</h2><button className="button ghost small" onClick={() => setHelp(false)} aria-label="Close help"><X size={20} /></button></div><ol><li><strong>Answer two questions.</strong> Both need to be correct. If you miss one, read the explanation and try a fresh pair.</li><li><strong>Join the flow.</strong> Two spaces are available. If they&apos;re taken, you&apos;ll join the queue in order.</li><li><strong>Watch for your turn.</strong> Leave this page open. Enable alerts for sound and optional browser notifications; your browser may limit alerts while the page is closed or asleep.</li><li><strong>Tap &ldquo;I&apos;m leaving.&rdquo;</strong> Your departure time is recorded when you tap, even if a space was reserved earlier.</li><li><strong>Tap &ldquo;I&apos;m back.&rdquo;</strong> This records your return and gives the next student a turn.</li></ol><button className="button primary" onClick={() => setHelp(false)}>Got it<Check size={17} /></button></section></div>}
+    {(showTutorial || help) && !showWarning && <StudentModal labelledBy="help-heading" onDismiss={showTutorial ? undefined : () => setHelp(false)}>
+      <div className={styles.tutorialArt}><Sprout size={34} strokeWidth={1.5} /></div>
+      <div className="modal-header"><div><p className="eyebrow">A LITTLE GUIDE TO A GOOD FLOW</p><h2 id="help-heading">Welcome to WaterCycle</h2><p>A quick learning. A little breathing room. Here&apos;s how your break works.</p></div>{!showTutorial && <button className="button ghost small" onClick={() => setHelp(false)} aria-label="Close How Breaks Work"><X size={20} /></button>}</div>
+      <ol className={styles.tutorialSteps}>
+        <li><div className={styles.tutorialStepTop}><Footprints size={27} strokeWidth={1.5} /><span>STEP 01</span></div><div><h3>Request a Break</h3><p>Choose whether you need to use the restroom or drink water.</p></div></li>
+        <li><div className={styles.tutorialStepTop}><BookOpen size={27} strokeWidth={1.5} /><span>STEP 02</span></div><div><h3>Quick Learning</h3><p>Answer two biology questions correctly. Your correct answers add up.</p></div></li>
+        <li><div className={styles.tutorialStepTop}><BellRing size={27} strokeWidth={1.5} /><span>STEP 03</span></div><div><h3>Get Your Turn</h3><p>An open space starts your timer immediately. Otherwise, wait for your turn and tap &ldquo;I&apos;m Leaving Now.&rdquo;</p></div></li>
+        <li><div className={styles.tutorialStepTop}><CheckCircle2 size={27} strokeWidth={1.5} /><span>STEP 04</span></div><div><h3>Return to Class</h3><p>Return within 10 minutes and click &ldquo;I&apos;m Back&rdquo; when you return.</p></div></li>
+      </ol>
+      {dialogError && <p className={`alert error ${styles.dialogError}`} role="alert">{dialogError}</p>}
+      <button autoFocus className={`button primary ${styles.dialogAction}`} disabled={busy} onClick={() => void completeTutorial()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It! Let&apos;s Go<ArrowRight size={17} /></button>
+    </StudentModal>}
+    {showWarning && visit && <StudentModal labelledBy="warning-heading" describedBy="warning-copy" warning>
+      <div className={`${styles.tutorialArt} ${styles.warningIcon}`}><TriangleAlert size={32} strokeWidth={1.5} /></div>
+      <div className="modal-header"><h2 id="warning-heading">Your Break Has Exceeded 12 Minutes!</h2></div>
+      <p id="warning-copy" className={styles.warningCopy}>Bathroom breaks should last no longer than 10 minutes. If you exceed the 10-minute limit again, you may lose your break privileges for one month.</p>
+      <div className={styles.warningTimer}><span>YOUR BREAK TIMER IS STILL RUNNING</span><strong>{elapsed(visit.leftAt, serverNow)}</strong></div>
+      {dialogError && <p className={`alert error ${styles.dialogError}`} role="alert">{dialogError}</p>}
+      <div className={styles.warningActions}><button autoFocus className="button secondary" disabled={busy} onClick={() => void acknowledgeWarning()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <Check size={17} />}Got It</button><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={17} />I&apos;m Back</button></div>
+    </StudentModal>}
   </div>;
+}
+
+function StudentModal({ children, labelledBy, describedBy, onDismiss, warning = false }: { children: React.ReactNode; labelledBy: string; describedBy?: string; onDismiss?: () => void; warning?: boolean }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    element?.showModal();
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { element?.close(); document.body.style.overflow = originalOverflow; previousFocus?.focus(); };
+  }, []);
+  return <dialog ref={dialog} className={`modal ${styles.studentDialog} ${warning ? styles.warningDialog : ""}`} aria-labelledby={labelledBy} aria-describedby={describedBy} onCancel={event => { event.preventDefault(); onDismiss?.(); }}>{children}</dialog>;
 }
 
 function HistoryTable({ visits }: { visits: Visit[] }) {
   if (visits.length === 0) return <div className="empty-state"><div className={styles.emptyIcon}><History size={25} /></div><h3>A fresh start.</h3><p className="muted">Your completed breaks will appear here.</p></div>;
   const showClass = visits.some(visit => Boolean(visit.classroomName));
-  return <div className="table-wrap"><table className="data-table"><thead><tr><th>Date</th>{showClass && <th>Class</th>}<th>Left</th><th>Returned</th><th>Duration</th><th>Status</th></tr></thead><tbody>{visits.map(visit => <tr key={visit.id}><td>{new Date(visit.requestedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</td>{showClass && <td>{visit.classroomName || "Earlier class"}</td>}<td>{time(visit.leftAt)}</td><td>{time(visit.returnedAt)}</td><td>{duration(visit.leftAt, visit.returnedAt)}</td><td><span className={`badge ${visit.status === "returned" ? "green" : "gray"}`}>{visit.status === "returned" ? "Returned" : "Cancelled"}</span></td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table className="data-table"><thead><tr><th>Date</th>{showClass && <th>Class</th>}<th>Purpose</th><th>Left</th><th>Returned</th><th>Duration</th><th>Status</th></tr></thead><tbody>{visits.map(visit => <tr key={visit.id}><td>{new Date(visit.requestedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</td>{showClass && <td>{visit.classroomName || "Earlier class"}</td>}<td>{visit.purpose ? purposeName(visit.purpose) : "Not recorded"}</td><td>{time(visit.leftAt)}</td><td>{time(visit.returnedAt)}</td><td>{duration(visit.leftAt, visit.returnedAt)}</td><td><span className={`badge ${visit.status === "returned" ? "green" : "gray"}`}>{visit.status === "returned" ? "Returned" : "Cancelled"}</span></td></tr>)}</tbody></table></div>;
 }
