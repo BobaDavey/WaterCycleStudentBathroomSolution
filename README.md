@@ -1,171 +1,231 @@
 # WaterCycle
 
-WaterCycle is a biology check-in and bathroom-pass app built with Next.js, React, TypeScript, and PostgreSQL. It supports one administrator, multiple teachers, and multiple class periods per teacher while retaining the original green and cream interface.
+**A quick learning. A better flow.**
+
+WaterCycle helps teachers manage classroom restroom and water breaks. Students answer biology questions, receive a fair turn, and record their departure and return. Teachers manage classes, approve student accounts, and review activity through a dedicated portal. A separate Developer Portal supports teacher account administration and problem reports.
+
+Built with **Next.js, React, TypeScript, and PostgreSQL**, with the existing green and cream WaterCycle design.
+
+## Current demo accounts
+
+Use these accounts in the current testing environment. Select the appropriate sign-in tab and enter the credentials manually.
+
+| Portal | Username | Password |
+| --- | --- | --- |
+| Teacher | `teachertest` | `1234567890` |
+| Student | `teststudent` | `1234567890` |
+
+These are public testing credentials. The Developer Portal uses its separately provisioned administrator account and private password. For a newly created local database, see the [local sample accounts](#local-sample-accounts) below; the seed script has its own fixtures and preserves existing credentials.
+
+## Features at a glance
+
+| Area | What WaterCycle supports |
+| --- | --- |
+| Student accounts | Registration with a class code, teacher approval, and Pending, Active, or Deactivated status |
+| Learning before breaks | Restroom or water purpose selection and two correct biology answers, one question at a time |
+| Classroom flow | Two shared break spaces per class, FIFO waiting lines, reserved turns, and departure/return timers |
+| Teacher controls | Multiple classes, roster management, approvals, password resets, transfers, and account deactivation/reactivation |
+| Activity tracking | Trip history, CSV exports, twelve-minute warnings, and Rule Offenders reports |
+| Return corrections | Audited **Mark as Still Out** actions that retain the original departure time and handle capacity safely |
+| Support | Teacher problem-report submission and developer-only ticket management |
+
+## Student Portal
+
+### Register and receive approval
+
+1. Choose **Create a student account** on the main sign-in page.
+2. Enter your name, username, password, and your teacher's **five-character enrollment code**. The suggested username is your first and last name together, without spaces.
+3. A valid code identifies the correct teacher and class automatically. Codes accept English letters and numbers, ignore letter case, and retain leading zeros, for example `BIO01` or `00123`.
+4. Your new account starts **Pending**. Sign in, complete the welcome tutorial, and wait for your teacher to approve it.
+5. Once approved, the dashboard recognizes your Active status automatically. You can use the same account without registering again.
+
+| Account status | Student access |
+| --- | --- |
+| Pending | Sign in, view permitted account information and activity, and complete the tutorial; approval is required before requesting a break |
+| Active | Use the normal break workflow when the class and question bank are available |
+| Deactivated | Sign in and view permitted information; new break requests are unavailable until the teacher reactivates the account |
+
+Pending students see **Your account is awaiting teacher approval.** Clicking **Request a Break** opens an approval explanation. Deactivated students receive a status-specific explanation. Server checks also prevent these accounts from starting questions, qualifying for a new break, joining a queue, reserving a space, or departing.
+
+### Request a break and return
+
+1. Click **Request a Break**, choose **Use Restroom** or **Drink Water**, and continue to the biology questions.
+2. Answer one question at a time until **Correct Answers: 2/2**. Correct answers accumulate; they do not have to be consecutive. A wrong answer shows feedback without resetting progress.
+3. If a space is available and earlier waiters have been served, the break starts immediately after the second correct answer. **Your time is NOW, GRAB A PASS** appears and the server records departure.
+4. If the class is full, join the FIFO queue. Waiting does not start your break timer. When called, you receive a **two-minute reservation** and click **I'm Leaving Now** to record departure.
+5. Click **I'm Back** when you actually return. This records your return time and releases the space.
+
+Restroom and water breaks share the same **two-student limit within each class**. Different classes have independent capacity and queues. Students can cancel a learning attempt or a waiting/reserved request. Unanswered reservations expire so the next eligible student can be called.
+
+The learning attempt lasts 15 minutes and retains its question and progress through refreshes and sign-ins. Questions are drawn from the class's active bank, with unseen questions first and a notice when questions begin repeating. A bank needs at least two active questions to start learning. **How Breaks Work** reopens the tutorial later.
+
+### Timers, warnings, and turn alerts
+
+- Break timers use the original saved departure and server time, so refreshing does not restart them.
+- Students are reminded to return within **10 minutes**.
+- At **12 minutes**, a warning appears. **I Got It** dismisses and saves acknowledgment while the timer continues. An unacknowledged warning appears again after refresh or sign-in.
+- A break becomes a Rule Offenders entry only when it lasts **longer than 12 minutes**. Each break counts once. Warnings do not automatically deactivate accounts or end trips.
+- Turn alerts include an in-page message, a browser-title change, and optional sound/browser notifications. Keep the page open for prompt alerts; closed-app push notifications are not provided.
+
+Students see their own records and aggregate classroom capacity, without access to other students' private records.
+
+## Teacher Portal
+
+Choose **I'm a teacher** on the main sign-in page. Teacher accounts are created by the administrator. **Create a teacher account** opens contact information for requesting an account. New or reset teachers must change their temporary password before managing classes.
+
+| Page | Teacher controls |
+| --- | --- |
+| Overview | Live classroom activity, capacity, queues, daily statistics, and **Pending Student Approvals** across the teacher's classes, oldest registration first |
+| Class Roster | Create, edit, archive, and restore classes; manage enrollment codes, periods, timezones, students, and account statuses |
+| Question bank | Add, edit, pause, activate, or remove biology questions for the selected class |
+| Trip history | Review departures, returns, and purposes; filter activity, export CSV, correct false returns, or open **Rule Offenders** |
+| Report Problems | Submit a name, contact email, and problem description to the developer |
+| Account Settings | Change the teacher account password through **Account Security** |
+
+### Classes, enrollment, and approval
+
+Each teacher can manage multiple class periods. Active enrollment codes must be unique across the application. Editing a class name, period, timezone, or code preserves its roster and history. Archiving stops new enrollment and break requests while keeping records available; students already outside can still return.
+
+Approve registered Pending students from **Overview → Pending Student Approvals** or their class roster. The pending panel includes a count, name, username, class/period, and registration date. Approval records the responsible teacher and timestamp, removes the student from the pending list, and enables break access when the student's dashboard refreshes. Teachers can manage only students in their own classes.
+
+Roster actions also support adding names before registration, viewing student records, resetting passwords, transferring students between the teacher's classes, and removing enrollment. Transfers and removals preserve the account and historical class attribution; an open trip is completed or its reservation cancelled. A removed student who self-enrolls with a new class code requires that class teacher's approval.
+
+Deactivating a student cancels learning and waiting/reserved requests while preserving any outside break and its timer. The student can still sign in and record a real return; the teacher can also reconcile the active trip. Deactivation and reactivation require confirmation.
+
+**Account Settings** contains only account security. Class names, codes, timezones, and the fixed two-space capacity information remain accessible through **Class Roster**.
+
+### Correct an inaccurate return
+
+Choose **Mark as Still Out** from recent activity, trip history, or student activity details when a student reports returning while still outside.
+
+After confirmation, WaterCycle reopens the **same break record**, retains the original departure, and saves the incorrect return, correcting teacher, correction time, and reason in an audit history. For example, leaving at 10:00, incorrectly returning at 10:05, and being corrected at 10:08 results in an eight-minute running timer. The existing reminders, warning, and Rule Offenders calculation continue from 10:00.
+
+If the released space has been reassigned, other students' active trips remain intact. The teacher sees the actual outside count and any temporary over-capacity condition. Further departures wait for space. Existing reserved turns keep their order, pause while blocked by the correction, and receive a fresh two-minute response window when space opens.
+
+The usual correction window is **24 hours after return**. Older corrections require an explicit confirmation and a reason of at least 10 characters. The student must still be enrolled in the original class and have no other open break request. Duplicate simultaneous corrections are rejected. The student can use **I'm Back** again when they actually return.
+
+### Rule Offenders
+
+Open **Trip history → Rule Offenders** to see completed and ongoing breaks longer than 12 minutes. Search by student, filter the teacher's active or archived classes, and load older entries. The table shows student, class/period, violation date, duration, and total violations within the teacher's classes.
+
+Entries are derived from reliable trip timestamps and retain the original class/teacher attribution after enrollment changes. Each class's configured IANA timezone controls violation dates, including daylight saving time. Other displayed times use the browser timezone; CSV timestamps are labeled UTC.
+
+### Report a problem
+
+Open **Report Problems** and complete **Your Name**, **Email Address**, and **Describe the Problem**. Reliable account information is prefilled and editable. All fields are required, and the server validates the email and saves the authenticated teacher association and submission time.
+
+After the ticket is saved, **Report Submitted!** confirms success and the form clears. Failure preserves entered information for retry. Duplicate clicks and retries do not create duplicate tickets. Teachers have access to the reporting form and acknowledgment, without a ticket-history or developer-management page.
+
+## Developer Portal
+
+Use **Developer sign in** on the main page or open **`/admin/login`**. Both login fields start blank. The Developer Portal authenticates the existing sole administrator and opens **`/admin/dashboard`**.
+
+- **Dashboard:** application-wide teacher, class, student, and trip statistics.
+- **Teachers:** create teacher accounts; edit account information; reset passwords; activate or deactivate teacher access. Deactivation preserves classes, rosters, questions, and history.
+- **Classes and Students:** read-only oversight with teacher/class filters and activity records.
+- **Problem Reports:** search by teacher name, email, or ticket ID; filter status; open full descriptions; load older reports; solve or reopen tickets. A sidebar badge counts tickets needing attention.
+- **Admin Settings:** edit the administrator profile and password. The administrator username is fixed, and the account cannot be deleted, demoted, disabled, or used to create another administrator.
+
+New tickets start **Need Attention**. Solving changes the status to **Solved**, records the resolution time and developer account, and preserves the submission. Reopening keeps prior resolution history. The default view shows unresolved tickets; the all-status view places unresolved tickets first, newest first within each status group. Teachers and students cannot access developer ticket APIs.
+
+Problem reporting stores tickets in the app. Email sending, ticket replies, and direct messaging are not included; the developer contacts teachers externally using their supplied email.
 
 ## Preview in GitHub Codespaces
 
-Create a Codespace from this repository's **main** branch. The dev container uses Node.js 24, installs dependencies, and prepares the local sample classrooms. After setup finishes:
+Create a Codespace from this repository's **main** branch. The dev container uses Node.js 24, installs dependencies, and prepares local sample data. Start the app:
 
 ```bash
 npm run dev
 ```
 
-Open the **Ports** tab and choose **Open in Browser** for port **3000**. The preview port can stay private. The Codespaces forwarding hostname is allowed automatically during development. If an existing Codespace predates this update, pull `main`, stop the app, and run **Codespaces: Rebuild Container**, or create a new Codespace.
+For an existing checkout, stop the running dev server before updating:
 
-The sign-in page starts with empty fields. Select the student or teacher sign-in tab and enter a sample account manually; demo autofill buttons have been removed. The demo is enabled only for an explicitly configured local database, never an external `DATABASE_URL`.
+```bash
+git pull --ff-only origin main
+npm install
+npm run dev
+```
 
-| Sample role | Username | Demo-only password |
-| --- | --- | --- |
-| Teacher | `morganreed` | `WaterCycle2026!` |
-| Teacher | `mariamiller` | `WaterCycle2026!` |
-| Student | `jamiechen` | `Biology2026!` |
-| Students in the same class | `alexrivera`, `sampatel` | `Biology2026!` |
+Open **Ports → 3000 → Open in Browser**. The forwarded port can remain private. If an older Codespace has outdated container settings, use **Codespaces: Rebuild Container**. A fresh local database uses the sample accounts described below.
 
-Morgan's original class uses **01001**, and another class uses **01002**. Maria's classes use **02001** and **02002**. The sample roster includes students in separate periods. Demo setup preserves existing accounts and records; it adds missing sample data without resetting passwords.
+## Local development
 
-**There is no built-in administrator password.** The Admin Portal login workflow is available in the demo, but the sole administrator must be provisioned using your own private secret as described below. No public sample administrator password is substituted for yours.
-
-## Provision the sole administrator privately
-
-The administrator username is fixed to **`davidanzezhang`**. There is no administrator registration page and no operation to create another administrator, delete this account, demote it, or change its username. Database constraints and a protection trigger enforce those rules as well as the server APIs.
-
-1. In your GitHub **Settings → Codespaces → Secrets**, create a repository-scoped secret named **`ADMIN_INITIAL_PASSWORD`**. Enter your chosen initial password privately there. Use at least eight characters; a long unique password is recommended. Do not put a real password into source files, `.env.example`, commits, screenshots, or chat.
-2. Start or restart the Codespace so the secret is available to the process. On the first database initialization, the app securely hashes the secret and creates the administrator **only if no administrator exists**. The dev-container setup also initializes the database.
-3. To provision explicitly, stop the local app first and run:
-
-   ```bash
-   npm run admin:bootstrap
-   npm run dev
-   ```
-
-4. Open **`/admin/login`** under the same preview address, or click **Developer sign in** on the main sign-in page. Enter `davidanzezhang` and your private password manually; both developer login fields start blank and no username hint is shown. Successful sign-in opens **`/admin/dashboard`**.
-5. After provisioning, remove `ADMIN_INITIAL_PASSWORD` from your Codespaces secrets and restart the Codespace. The stored hash remains valid. Startup never resets an existing administrator's password, even if this variable is later changed. Use **Admin Settings** to change the password securely.
-
-For a Vercel deployment, supply `ADMIN_INITIAL_PASSWORD` privately in the project's environment settings for initial provisioning, then remove it and redeploy after successful setup. A private local `.env.local` may also provide the variable; it is ignored by Git and the CLI loads it without printing values. Proxy-backed HTTP credential placeholders are not suitable for a password that must be hashed locally; use an actual process environment secret.
-
-If the private secret is absent, the app does **not** invent a password. Existing teacher and student accounts continue to work. The Admin Portal explains the provisioning step. If a non-administrator already owns the reserved username, provisioning fails clearly and leaves that account untouched; resolve the username conflict deliberately before retrying.
-
-## Administrator workflow
-
-The public privileged login is labeled **Developer Sign In**. It still authenticates the existing, sole administrator; no developer role or extra account is created. The protected dashboard and `/admin/login` and `/admin/dashboard` routes are preserved.
-
-The administrator has a separate portal and sidebar:
-
-- **Dashboard:** teacher totals, active/inactive teachers, active classes, registered students, and existing usage statistics.
-- **Teachers:** search, create, edit, activate/deactivate, and reset teacher credentials. Creation accepts a name, username or email, temporary password, and status. New and reset teachers must change that password before managing classes. Passwords are hashed and existing passwords are never displayed.
-- **Classes:** view classes across teachers, filter by teacher, and open a class roster and its activity.
-- **Students:** view student accounts and enrollment information, filtered by teacher and class.
-- **Problem Reports:** developer-only report search, status filters, full ticket details, resolution/reopening history, and older reports.
-- **Admin Settings:** edit profile information and change the administrator password. The username remains fixed.
-
-Teacher deactivation revokes login access while preserving classes, student accounts, enrollments, questions, and history. Classroom and student-record oversight is read-only in the administrator portal; teacher account management is explicitly writable. Teacher accounts are created by the administrator; the former public first-teacher setup route is retired.
-
-## Teacher workflow
-
-Sign in on the main page using **I'm a teacher**. **Create a teacher account** opens an informational registration pop-up with the contact email; it does not create or submit an account request. Student sign-in retains its separate student registration link. Administrators supply new teachers with a temporary password; change it at the first sign-in.
-
-1. Open **Class Roster**. The overview lists your classes, periods, enrollment codes, and student counts, with an archived-class view.
-2. Choose **Create Class**. Enter a name, optional period, and your chosen **five-character code** using English letters and numbers, such as `BIO01`, `AB123`, or `00123`. Letters uppercase as you type; enrollment and uniqueness are case-insensitive. Numeric codes and leading zeros are preserved. Active codes are unique across all teachers; duplicates and invalid characters are rejected by both the API and database.
-3. Use **Edit Class** to change names, periods, and codes. Changing a code preserves students and history. **Archive Class** requires confirmation, prevents new enrollment and learning/pass requests, and retains historical records. Students already out can still record their return.
-4. Choose **View Class** to manage that class's roster. Search students, add names ahead of registration, view student details and records, reset passwords, approve pending registrations, or deactivate/reactivate break access. Removing a student from a class keeps their account and history. Transfers are limited to another active class owned by the same teacher and preserve past activity under its original class.
-5. Under **Trip history → Rule Offenders**, view one entry per break longer than 12 minutes, including ongoing breaks. Search by student and filter across your active or archived classes. Entries use the original break/class ownership after transfers, show total violations within your classes, and load older records through pagination. The report is read-only and never suspends students.
-6. Set **Class timezone** when creating or editing a class. Existing classes start with `America/New_York`; choose the actual classroom IANA timezone, such as `Asia/Taipei` or `Europe/London`. Rule Offenders dates use this setting, including daylight saving time. Stored timestamps remain unchanged.
-7. Select the class for **Overview**, **Question bank**, and **Trip history**. Questions and trips remain scoped to that class. Enrollment-code and class-name controls live only in **Class Roster**; **Account Settings** contains only account security. The fixed two-student capacity and reservation rules are shown in Class Roster.
-
-Roster removals and transfers require confirmation. If a student has an active pass, the operation finishes an out trip or cancels a reservation, records the change without deleting history, and releases the old class's space. A removed student can sign in and join another active class with its valid code; self-enrollment requires approval by the new class teacher.
-
-## Student approval and return corrections
-
-**Overview → Pending Student Approvals** lists registered pending students from all of the signed-in teacher's classes, oldest first, with a count. **Approve** records the teacher, class, previous status, new status, and server timestamp. Approval also appears in each class roster. The student dashboard polls every three seconds and refreshes when brought to the foreground; approval requires no new account or sign-in.
-
-New students see **Your account is awaiting teacher approval.** and can open the status-specific explanation using **Request a Break**. Pending and Deactivated students may sign in, view their status, tutorial and own history, and change passwords, but server-side checks block learning, qualification, queueing, reservations, and departure. Deactivation cancels unused learning and waiting/reserved requests. It preserves any outside trip and its original timer; the student can still use **I'm Back**, and the teacher can record a return. Roster **Deactivate** and **Reactivate** controls require confirmation. Existing active student accounts stay Active during migration; previously disabled accounts become Deactivated without changing passwords or historical records.
-
-From **Recent activity**, **Trip history**, or student activity details, choose **Mark as Still Out** to correct a false return. Confirmation reopens the same trip, keeps the original departure, and stores the incorrect return, teacher identity, correction time and reason in an audit history visible with the trip. The existing timer, warning, and single Rule Offenders entry continue to use that same departure and trip ID. No innocent student's active trip is cancelled. The class displays every active trip and warns when the actual outside count exceeds capacity. Ready reservations keep their original order while a correction blocks their departure; their two-minute response window resumes when a spot opens.
-
-Corrections normally cover the most recent **24 hours** after return. Older records require an explicit older-correction confirmation and a reason of at least 10 characters. Duplicate simultaneous corrections and reopening while the student has another open request are rejected transactionally. The student must still be enrolled in the original class; enrollment changes must be reconciled before reopening a historical trip. Records are never reassigned to a different teacher/class by a correction.
-
-## Problem reporting
-
-Teachers use **Report Problems** to submit their name, contact email, and description. Reliable account information is prefilled and editable. All fields are required; the server validates lengths and email format, associates the report with the authenticated teacher, and saves the submission timestamp. A per-submission UUID prevents duplicate tickets from repeated clicks or network retries. A saved report shows **Report Submitted!**, then clears the form. Failure preserves the entered text and provides a retryable error. Teachers have no ticket history, status controls, or access to developer report APIs.
-
-The existing sole administrator uses **Problem Reports** in the Developer Portal to search by teacher name, email or ticket ID, filter **Need Attention**, **Solved**, or all tickets, open full descriptions, and load older reports. The sidebar badge counts tickets needing attention and refreshes with administrator state. New reports start Need Attention. All-status results put unresolved reports first, newest first within each group. Solving records the server resolution time and developer account. Reopening retains the original submission and the complete status history, including prior resolutions. Solved reports are never deleted. No email sending, replies, or notifications are configured; contact the teacher externally using the supplied email.
-
-## Student workflow
-
-1. On the main sign-in page, choose **Create a student account**.
-2. Enter first name, last name, username, password, and the teacher's five-character classroom code. The suggested username is `firstnamelastname`; it can be changed to an available username containing letters and numbers.
-3. A valid code automatically identifies the correct teacher and class. There is no teacher/period selection step. Invalid, archived, and unavailable codes show an error without creating an account. A pre-added roster entry can be claimed once; duplicate usernames and active enrollments are rejected. Every new registration or roster claim starts **Pending**. The student can sign in and complete the tutorial, but must be approved by the owning teacher before starting questions or requesting a break.
-4. Sign in later with that username and password. Existing usernames and passwords continue working.
-5. After first registration, a four-step welcome tutorial explains breaks. **Got It! Let's Go** saves completion to the account; **How Breaks Work** reopens the guide later. Existing students are not forced through a new registration tutorial.
-6. Choose **Request a Break**, select **Use Restroom** or **Drink Water**, then **Continue**. Both purposes share the same class capacity and queue. Teachers can see the purpose in live activity, history, student records, and CSV exports.
-7. Answer one biology question at a time until **Correct Answers: 2/2**. Correct answers accumulate and need not be consecutive. Wrong answers give brief feedback without resetting progress. Unseen questions are used first; after the bank is exhausted, questions cycle with a clear notice. At least two active questions are needed. The current question and correct count survive refreshes and sign-ins during the 15-minute learning attempt; **Cancel learning check** abandons the attempt.
-8. If a space is available after earlier waiters have been served, the break starts automatically on the server immediately after the second correct answer. **Your time is NOW, GRAB A PASS** shows the purpose, running timer, and 10-minute return reminder. No extra departure click is required.
-9. If both spaces are reserved or occupied, the student sees **You're in line!**, a live queue position, the purpose, and **Cancel Request**. Waiting does not start the break timer. When a spot opens, **It's your turn! You're cleared to go.** reserves the space for **two minutes**. **I'm Leaving Now** validates that reservation and records departure. An unanswered reservation expires and the next eligible waiter is promoted automatically on the next poll or class action; an expired student may request again.
-10. **I'm Back** records return and releases the space. At 10 minutes, a reminder appears; at exactly 12 minutes, a serious warning appears with the requested bold red message. **I Got It** closes it immediately and saves acknowledgement to that break record; an unacknowledged warning returns after refresh or login. The timer keeps running. A Rule Offenders entry is counted only **after** 12 minutes, so exactly 12 minutes is not a violation. This warning never bans, suspends, disables, or automatically ends a break. Teacher controls remain independent.
-
-Normal allocation permits at most **two students per class** reserved or out, independently of every other class. A teacher correction may reveal additional students actually outside; this is shown as temporary over-capacity and blocks additional departures until space is available. Reloading or signing out does not lose a break or queue position. Students see their own account and history plus aggregate capacity counts, never other students' private records. Turn alerts include a prominent in-page message, browser-title change, and optional sound/browser notifications. Keep the page open; browsers can throttle background pages and closed-app push notifications are not provided.
-
-## Migration and existing records
-
-Rule violations are derived from reliable departure/return timestamps (or the server time for a currently active break). The existing break id is the stable violation id; polling and warning acknowledgements cannot create duplicates. Missing starts, missing completed returns, and invalid negative durations are excluded. No historical violation rows or missing timestamps are invented.
-
-Migration 4 adds student statuses and approval metadata, correction audit history, paused reservations, and problem-report/status-history tables without deleting accounts, enrollments, quizzes, sessions, or trips. New student rows default to Pending; existing student statuses are initialized once from their previous enabled state.
-
-Schema changes run transactionally and are recorded so they can be applied again safely. Existing teachers are associated with their original classrooms. Existing student enrollment, questions, quizzes, sessions, and trip timestamps are preserved. New class ownership and enrollment relationships enforce teacher isolation and prevent duplicate active student enrollments.
-
-The earlier multi-teacher migration retained invalid old enrollment codes as `legacy_code` and left their active code unset. **The teacher must choose a valid five-character code in Class Roster before accepting new students.** This update preserves existing numeric codes and stores all new letters in uppercase. The app does not select a real classroom's code on the teacher's behalf. Existing enrolled students and history remain attached to the same class. The opt-in sample-data setup updates the known old sample code to the documented sample code. Historical trips keep their original timestamps and show **Not recorded** where no purpose was previously collected. In-progress legacy two-question quizzes are retained but retired safely; students can start the new learning flow. Existing queued reservations receive a single two-minute response window when this migration first runs.
-
-Migration stops instead of guessing if an old class has no identifiable teacher or has ambiguous ownership. Back up the database before deploying a schema update and resolve such ownership deliberately. Archived class codes are inactive; a code can be used by only one active class at a time.
-
-## Local development outside Codespaces
-
-Use Node.js **22 or newer** and npm; Node.js 24 is used in the dev container.
+Use Node.js **22 or newer**; the development container uses Node.js 24.
 
 ```bash
 npm install
 cp .env.example .env.local
 ```
 
-For local sample data, set `LOCAL_DATABASE=true` and `DEMO_MODE=true` in ignored `.env.local`, then:
+For a local database, enable `LOCAL_DATABASE=true` and `DEMO_MODE=true` in ignored `.env.local`, leave `DATABASE_URL` empty, and prepare sample data:
 
 ```bash
 LOCAL_DATABASE=true npm run db:seed
 npm run dev
 ```
 
-The explicit seed command reads process variables rather than loading Next.js's `.env.local` automatically, so the prefix is intentional. It refuses to run against an external `DATABASE_URL` and does not seed an administrator with a substitute password.
+The seed command reads process environment variables rather than loading Next.js's `.env.local` automatically, so the command includes the local-database setting explicitly. Seeding refuses an external `DATABASE_URL`, adds missing sample data, and preserves existing credentials and records.
 
-Local PGlite data lives under ignored `.local/data`. Stop the server before a seed or bootstrap command uses that same directory. Separate instances need separate `LOCAL_DATABASE_PATH` values. See [local database safety](docs/local-database.md). The schema and administrator CLI also work with a managed PostgreSQL `DATABASE_URL`.
+### Local sample accounts
+
+<details>
+<summary>Accounts created by the local seed script</summary>
+
+These fixtures are separate from the current testing accounts listed at the top of this README.
+
+| Local sample role | Username | Initial sample password |
+| --- | --- | --- |
+| Teacher | `morganreed`, `mariamiller` | `WaterCycle2026!` |
+| Student | `jamiechen`, `alexrivera`, `sampatel` | `Biology2026!` |
+
+The seed creates two teachers, four classes, 18 approved sample students, biology banks, and completed sample trips. Morgan's classes use `01001` and `01002`; Maria's use `02001` and `02002`. Previously changed passwords remain unchanged. No default administrator password is seeded.
+
+</details>
+
+Local PGlite data lives in ignored **`.local/data`**. Stop the app before running a seed or administrator bootstrap command against that directory. Separate running instances need separate `LOCAL_DATABASE_PATH` values. See [local database safety](docs/local-database.md).
+
+## Provision the administrator
+
+The sole administrator username is **`davidanzezhang`**. Its password must be supplied privately; WaterCycle has no built-in administrator password.
+
+1. Set **`ADMIN_INITIAL_PASSWORD`** through a repository-scoped Codespaces secret, Vercel environment setting, or ignored local `.env.local`. Use your own password of at least eight characters.
+2. Initialize the database. Startup creates the administrator only if it does not already exist. For explicit local provisioning, stop the app and run `npm run admin:bootstrap`.
+3. Start the app and sign in at **`/admin/login`** with the fixed username and your private password.
+4. Remove the initial-password variable and restart/redeploy after successful provisioning. Existing password hashes remain valid; the variable never resets an existing administrator password. Use **Admin Settings** for later password changes.
+
+If no secret is supplied, no substitute password is created. Existing teacher and student accounts continue working. If another account already owns the reserved administrator username, provisioning stops without overwriting it.
 
 ## Deploy to Vercel
 
-1. Import this GitHub repository into Vercel as a **Next.js** project, using the repository root. Build command: `npm run build`; use the default output directory.
-2. Connect a managed PostgreSQL database, such as Neon, and set **`DATABASE_URL`** privately in Vercel project settings. Prefer the pooled URL and retain its TLS settings (typically `sslmode=require`).
-3. Set **`ADMIN_INITIAL_PASSWORD`** privately for first administrator provisioning. **Do not enable `LOCAL_DATABASE` or `DEMO_MODE` on Vercel.**
-4. Deploy, open the app, then sign in at **`/admin/login`** using `davidanzezhang` and your private initial password. Remove the initial-password variable and redeploy after successful provisioning.
-5. Create teachers in the Admin Portal, have teachers change their temporary passwords and create class codes, and have students register with those codes.
+1. Import this repository as a **Next.js** project, using the repository root and `npm run build`.
+2. Connect managed PostgreSQL, such as Neon, and set **`DATABASE_URL`** privately. Preserve the provider's TLS settings and use its pooled connection URL when available.
+3. Supply **`ADMIN_INITIAL_PASSWORD`** privately for first-time administrator provisioning. Keep `LOCAL_DATABASE` and `DEMO_MODE` disabled.
+4. Deploy and sign in through **Developer sign in**. Remove the initial-password variable and redeploy after provisioning.
+5. Create teacher accounts. Teachers change their temporary passwords, create classes and enrollment codes, and approve newly registered students.
 
-Vercel's local filesystem is not persistent storage. Production requires PostgreSQL for all accounts, sessions, enrollments, quiz challenges, trips, rate limits, and queue transactions. Publication of a cloud development snapshot is separate from deployment to Vercel. This repository update alone does not claim a live Vercel deployment.
+Vercel's local filesystem is not persistent storage; a shared deployment requires PostgreSQL. Updating this repository does not itself publish a Vercel deployment.
 
-## Verification
+## Existing data and migrations
+
+Schema migrations run transactionally and are versioned. Existing active student accounts remain Active; previously disabled students become Deactivated. Accounts, enrollment, passwords, biology activities, sessions, and historical trips are preserved. New registration and roster claims default to Pending.
+
+The earlier class migration retained invalid legacy codes as `legacy_code`. Teachers must choose a valid five-character replacement in **Class Roster** before reopening enrollment. Ownership migration stops if an original class has missing or ambiguous teacher ownership. Historical trips retain their timestamps and show **Not recorded** where purpose was not previously collected; missing violation timestamps are not invented. Legacy learning attempts retired by the earlier break-workflow migration remain stored.
+
+Back up a deployed database before applying migrations. Enrollment changes and return corrections retain historical class attribution and audit records.
+
+## Verification and implementation
 
 ```bash
 npm run typecheck
 npm test
-npm run build
 npm run test:e2e
+npm run build
 ```
 
-Tests cover legacy-data migration, private/idempotent administrator provisioning, singleton protection, teacher/class ownership, temporary-password changes, case-insensitive alphanumeric code uniqueness and leading zeros, enrollment validation, transfers/history, archived classes, roster isolation, queue concurrency/FIFO, cumulative learning progress/expiry/replay, automatic versus queued departure, reservation expiry/FIFO, tutorial persistence, warning acknowledgments without automatic restrictions, timestamp-derived violations with strict thresholds/scoped totals/pagination/timezones, empty developer login fields, teacher account-request presentation, sessions/passwords, and purpose-aware exports. Additional approval/support coverage checks pending and deactivated login versus break permissions, stale-session enforcement, scoped/idempotent approvals, queue cleanup with safe returns, original-timer corrections, over-capacity and paused reservation recovery, older-record confirmation, correction audit/history, private report submission with duplicate protection, report validation and failed-form recovery, developer-only ticket search/pagination and solve/reopen history, and the renamed Account Settings. Browser tests recreate only the isolated `.local/e2e-data` fixture. They never reset application data or need your real administrator password; any test administrator secret is generated privately at runtime.
+Automated coverage includes account approval and migration preservation, current-status enforcement, role/class ownership, teacher and developer authentication, password changes, class codes, roster actions, biology learning and retry protection, tutorials, FIFO/reservation concurrency, timers and warnings, Rule Offenders, return corrections and paused-capacity recovery, report validation and failed-form recovery, and developer ticket search, pagination, and status history.
 
-Browser tests use Chromium at `/usr/bin/chromium` when present. Otherwise run `npx playwright install chromium`, or set `CHROMIUM_PATH` to your Chromium executable.
+Browser tests recreate only **`.local/e2e-data`**. They use a generated test administrator secret and do not reset the application database. Chromium at `/usr/bin/chromium` is used when available; otherwise run `npx playwright install chromium` or set `CHROMIUM_PATH`.
 
-## Implementation notes
+Classroom mutations use transactional row locks, and a student can have only one active break request. Question banks are snapshotted into class-scoped learning attempts, with opaque question tokens and idempotent answer handling. Passwords use salted scrypt hashes; sessions are stored hashed and use HttpOnly, SameSite cookies with Secure on HTTPS. Mutations enforce same-origin requests, validated inputs, and current role/ownership checks. CSV exports neutralize spreadsheet formula cells.
 
-Classroom mutations use database row locks and reserve both `ready` and `out` passes toward the two-space limit. Question banks are snapshotted server-side for 15-minute, class-scoped learning attempts. Each presented question has an opaque token; duplicate submissions cannot count twice or create duplicate breaks. Only the current question, safe progress, and submitted-answer feedback are sent to students. Students cannot reuse a challenge after a class transfer.
-
-Passwords use salted scrypt hashes. Random sessions are stored hashed and sent through HttpOnly, SameSite cookies, with Secure cookies on HTTPS. Mutations enforce same-origin requests and validated inputs; every privileged query checks the current role and class ownership. Password resets invalidate existing sessions. Exports neutralize spreadsheet formula cells.
-
-Queued reservations have a two-minute response window. Server-side maintenance expires reservations and promotes eligible waiters under the same class row lock used for requests and returns. Polling runs every three seconds in the student portal; the page should remain open for prompt in-app notifications. Break timers use persisted departure timestamps and the server clock, so a refresh or different device does not reset elapsed time. Daily summaries use the database day boundary (UTC by default); Rule Offenders timestamps use the configured class timezone, other displayed timestamps use the viewer's local timezone, and CSV timestamps are labeled UTC. Keep PostgreSQL backups through your provider.
-
-Source, dependency manifests, tests, and configuration belong in Git. Real passwords, local databases, private environment files, generated builds, dependencies, and claim tokens remain ignored.
+Application data, private environment files, real credentials, dependencies, and generated builds remain outside Git. The demo credentials above are intentionally published for testing.
