@@ -1,0 +1,15 @@
+# Credentials and local-only classroom records must never be uploaded.
+.env
+.env.*
+.local/
+.git/
+
+# Dependencies, builds, caches and test artifacts are recreated remotely.
+node_modules/
+.next/
+.next-e2e/
+.npm/
+.npm-cache/
+playwright-report/
+test-results/
+*.log
