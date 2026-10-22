@@ -111,3 +111,17 @@
 @media (max-width: 720px) { .classLabel, .sidebarNote, .profile, .brandSub { display: none; } .rightColumn { grid-template-columns: 1fr; } .stepsCard { display: none; } .dateLabel { display: none; } .hero { min-height: 330px; padding: 26px; } .hero h2 { font-size: 39px; } .heroCopy { max-width: 100%; } .heroArt { opacity: .3; right: -100px; } .hero p { max-width: 300px; } .heroPill { font-size: 8px; } .hero .heroFootnote { font-size: 9px; } .passCard { padding: 23px; } .passCard h2 { font-size: 32px; } .passId { display: none; } .passActions { gap: 8px; } .passActions > button { flex: 1 1 auto; } .quizCard { padding: 20px; } .footer { flex-wrap: wrap; gap: 12px; } .footer > :last-child { display: none; } .alertToggle > span { display: none; } .tripTimer span { font-size: 49px; } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } .answer { transition: none; } }
 @media (min-width: 641px) and (max-height: 850px) { .sidebarNote { display: none; } .classLabel { margin-top: 0; padding-top: 18px; margin-bottom: 19px; } }
+.periodLabel { display: block; color: #839075; font-size: 10px; }
+.classNotice { margin-bottom: 18px; }
+.enrollmentCard { padding: 32px; }
+.enrollmentCard h2 { font: 34px/1.2 Georgia, serif; color: #3d4e37; letter-spacing: -.8px; margin: 12px 0; }
+.enrollmentCard > p { font-size: 13px; line-height: 1.8; max-width: 480px; }
+.enrollmentCard form { display: grid; gap: 12px; margin-top: 24px; max-width: 330px; }
+.enrollmentCard form > button { justify-self: start; margin-top: 4px; }
+.codeInput { font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: 3px; }
+.codeInput::placeholder { letter-spacing: 1px; font-size: 14px; }
+.enrollmentInfo h2 { font-size: 17px; }
+.enrollmentInfo > p, .enrollmentInfo > div > p { font-size: 12px; color: #7b8770; line-height: 1.8; }
+.enrollmentInfo > div:last-child { display: flex; align-items: flex-start; gap: 10px; border-top: 1px solid #e5e8df; padding-top: 18px; margin-top: 20px; }
+.enrollmentInfo > div:last-child > svg { flex-shrink: 0; color: #6d8858; }
+@media (max-width: 720px) { .enrollmentCard { padding: 24px; } .enrollmentCard h2 { font-size: 29px; } .enrollmentCard form { max-width: none; } }
