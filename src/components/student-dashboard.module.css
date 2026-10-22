@@ -1,0 +1,112 @@
+.brandSub { display: block; font: 9px/1.7 var(--font-body, sans-serif); letter-spacing: 1.65px; opacity: .55; margin-top: 3px; }
+.classLabel { margin: 20px 22px 25px; border-top: 1px solid #e5e8df; padding-top: 25px; display: grid; gap: 9px; }
+.classLabel > :first-child { color: #9aa38f; font-size: 9px; }
+.classLabel strong { color: #43583e; font-size: 13px; font-weight: 500; }
+.classLabel > :last-child { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #8a967f; }
+.liveDot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6f9d69; flex-shrink: 0; }
+.sidebarNote { margin: auto 22px 22px; padding: 23px 18px; background: #edf1e5; border: 1px solid #e5ebdb; border-radius: 12px; color: #60734d; }
+.sidebarNote > svg { color: #90a775; margin-bottom: 13px; }
+.sidebarNote strong { display: block; font: 25px/1.15 Georgia, serif; letter-spacing: -.3px; }
+.sidebarNote p { font-size: 11px; color: #8c997f; line-height: 1.7; margin: 12px 0 0; }
+.profile { display: flex; gap: 10px; align-items: center; padding: 0 9px 15px; }
+.profile > div { display: grid; gap: 3px; }
+.profile strong { font-size: 12px; color: #58664d; font-weight: 500; }
+.profile > div > span { color: #939c88; font-size: 10px; }
+.headingDot { color: #c89457; font-size: 30px; vertical-align: middle; }
+.dateLabel { display: flex; align-items: center; gap: 8px; color: #77817a; font-size: 12px; }
+.alertToggle { white-space: nowrap; }
+.studentGrid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.mainColumn, .rightColumn { display: grid; gap: 24px; min-width: 0; }
+.hero { position: relative; overflow: hidden; background: #e9eddf; border: 1px solid #dce2d1; border-radius: 16px; min-height: 348px; padding: 34px; display: flex; align-items: center; }
+.heroCopy { position: relative; z-index: 1; max-width: 76%; }
+.heroPill { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 700; color: #586c46; letter-spacing: 1.3px; margin-bottom: 20px; }
+.hero h2 { font-family: Georgia, serif; font-weight: 400; font-size: clamp(32px, 3.2vw, 46px); line-height: 1.08; letter-spacing: -1.7px; margin: 0 0 17px; color: #2c4232; }
+.hero p { color: #66705b; font-size: 12px; line-height: 1.8; margin-bottom: 24px; }
+.hero .heroFootnote { margin-top: 18px; display: flex; align-items: center; gap: 6px; font-size: 10px; color: #78816e; }
+.hero .unavailable { margin-bottom: 0; font-size: 11px; color: #775c35; }
+.heroArt { position: absolute; right: -40px; bottom: 18px; width: 250px; height: 260px; color: #8e9e78; pointer-events: none; }
+.orbitOne, .orbitTwo { position: absolute; border: 1px solid #cbd5b9; border-radius: 50%; }
+.orbitOne { width: 240px; height: 240px; top: 10px; left: 15px; }
+.orbitTwo { width: 188px; height: 188px; top: 36px; left: 41px; }
+.plant { position: absolute; top: 53px; left: 57px; transform: rotate(-10deg); color: #7d916b; }
+.artSpark { position: absolute; top: 19px; left: 69px; font-size: 32px; color: #bc8d4c; }
+.artLeaf { position: absolute; left: 29px; bottom: 44px; background: #f4f5e9; padding: 13px; border-radius: 50%; transform: rotate(35deg); }
+.artLabel { position: absolute; bottom: 13px; left: 86px; letter-spacing: 2px; color: #859272; font-size: 8px; }
+.capacityCard { padding: 23px; }
+.capacityCard :global(.card-header) { padding: 0; margin-bottom: 12px; }
+.capacityCard h2, .recentCard h2 { font-size: 17px; }
+.capacityCard > p { font-size: 12px; line-height: 1.8; }
+.liveLabel { display: flex; align-items: center; gap: 5px; font-size: 8px; font-weight: 700; letter-spacing: 1px; color: #758a69; }
+.capacitySlots { display: flex; gap: 12px; margin: 23px 0 19px; }
+.capacitySlot { flex: 1; padding: 20px 8px 15px; display: grid; justify-items: center; gap: 6px; border: 1px dashed #d0d8ca; border-radius: 12px; background: #f7f9f3; color: #557247; }
+.capacitySlot > div { background: #e8efdf; width: 45px; height: 45px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 5px; }
+.capacitySlot strong { font-size: 12px; font-weight: 600; }
+.capacitySlot > span { font-size: 10px; color: #90998b; }
+.slotUsed { background: #fcf5ec; border: 1px solid #efddc4; color: #a47840; }
+.slotUsed > div { background: #f4e7d6; }
+.queueSummary { border-top: 1px solid #eee; padding-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #646d60; }
+.capacityCard .capacityNote { font-size: 10px; color: #92998e; margin: 10px 0 0; }
+.stepsCard { background: #f2f0e8; border-radius: 14px; padding: 25px; }
+.stepsCard > span { font-size: 9px; letter-spacing: 1px; color: #8e8b7b; }
+.stepsCard h2 { font-family: Georgia, serif; font-size: 27px; font-weight: 400; color: #455444; margin: 12px 0 24px; letter-spacing: -.7px; }
+.stepsCard ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 20px; }
+.stepsCard li { display: flex; gap: 12px; }
+.stepsCard li > span { border: 1px solid #dcded0; width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; color: #85906f; font-size: 9px; }
+.stepsCard strong { font-size: 11px; color: #565e4d; }
+.stepsCard p { font-size: 11px; line-height: 1.7; color: #87887b; margin: 5px 0 0; }
+.emptyIcon { height: 48px; width: 48px; display: grid; place-items: center; background: #f2f3eb; border-radius: 50%; color: #8c9e7f; margin: 0 auto 12px; }
+.footer { display: flex; justify-content: space-between; padding: 27px 0 5px; font-size: 10px; color: #92998d; }
+.footer span:first-child { display: flex; align-items: center; gap: 7px; }
+.passCard { border: 1px solid #dedecf; border-radius: 16px; padding: 27px 32px 32px; background: #f1f1e5; }
+.passCardTop { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-bottom: 22px; }
+.passTag { display: flex; align-items: center; gap: 7px; font-size: 9px; font-weight: 700; letter-spacing: 1.3px; color: #687447; }
+.passId { font-size: 8px; color: #969a86; letter-spacing: 1.3px; }
+.passCard h2 { font: 37px/1.15 Georgia, serif; letter-spacing: -1px; color: #3d4e37; margin: 15px 0; }
+.passCard > p { font-size: 13px; line-height: 1.8; color: #6f775e; max-width: 440px; }
+.passActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+.queueNumber { color: #9c763f; font: 75px/1 Georgia, serif; margin-top: 15px; display: flex; align-items: baseline; gap: 12px; }
+.queueNumber span { font: 15px/1.4 sans-serif; color: #8b8874; }
+.waiting { background: #f6f0e3; border-color: #e6dcc5; }
+.waiting .passTag { color: #a17d46; }
+.ready { background: #e4eddb; border-color: #d3e0c6; }
+.bigPassIcon { color: #658853; }
+.out { background: #e7eee9; border-color: #d1dfd4; }
+.tripTimer { display: flex; align-items: center; gap: 14px; color: #4b7057; }
+.tripTimer span { font: 58px/1.2 Georgia, serif; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.quizCard { padding: 28px; }
+.quizCard :global(.card-header) { padding: 0; border: 0; margin-bottom: 15px; }
+.quizCard :global(.card-header) h2 { font: 29px/1.2 Georgia, serif; letter-spacing: -.7px; margin-top: 10px; }
+.quizCard > p { font-size: 12px; line-height: 1.8; }
+.question { border: 0; border-top: 1px solid #eee; margin: 23px 0 0; padding: 24px 0 0; min-width: 0; }
+.question legend { float: left; width: 100%; display: flex; gap: 10px; font-size: 14px; line-height: 1.6; color: #374533; font-weight: 600; padding: 0; margin-bottom: 12px; }
+.questionNumber { flex-shrink: 0; width: 25px; height: 25px; display: grid; place-items: center; font-size: 10px; background: #eaf0e2; border-radius: 50%; color: #6e855f; }
+.topic { margin-bottom: 13px; margin-left: 35px; }
+.answers { clear: both; display: grid; gap: 8px; }
+.answer { cursor: pointer; border: 1px solid #e7e8df; border-radius: 9px; display: flex; gap: 10px; align-items: center; padding: 12px 13px; font-size: 12px; line-height: 1.6; transition: border-color .15s, background .15s; }
+.answer:hover { background: #f7f9f2; border-color: #b8c8aa; }
+.answer:has(input:focus-visible) { outline: 2px solid #5c7955; outline-offset: 2px; }
+.answer input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.optionLetter { display: grid; place-items: center; flex-shrink: 0; border: 1px solid #e0e4d8; border-radius: 5px; width: 25px; height: 25px; color: #8b9580; font-size: 10px; }
+.answer > svg { margin-left: auto; color: #65894e; flex-shrink: 0; }
+.selectedAnswer { border-color: #9db889; background: #eff5e8; color: #3f5736; }
+.selectedAnswer .optionLetter { background: #5c794b; color: white; border-color: #5c794b; }
+.feedback { border-radius: 8px; padding: 11px 13px; font-size: 12px; line-height: 1.7; margin-bottom: 0; }
+.correct { background: #edf5e7; color: #516b43; }
+.incorrect { background: #fff2e8; color: #986335; }
+.quizFooter { margin-top: 25px; padding-top: 20px; border-top: 1px solid #eceee6; display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.quizFooter > p { font-size: 11px; }
+.loading { padding: 70px 25px; display: grid; justify-items: center; gap: 10px; color: #6c805d; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.passwordCard { max-width: 570px; padding: 32px; }
+.passwordCard h2 { font: 31px/1.2 Georgia, serif; margin: 13px 0; }
+.passwordCard > p { line-height: 1.8; font-size: 13px; }
+.passwordCard form { display: grid; gap: 19px; margin-top: 24px; }
+.passwordCard form > button { justify-self: start; }
+.circleIcon { display: grid; place-items: center; width: 55px; height: 55px; border-radius: 14px; background: #e9f0e1; color: #6b8558; margin-bottom: 25px; }
+.helpModal ol { padding-left: 23px; display: grid; gap: 19px; line-height: 1.8; font-size: 13px; color: #748069; margin: 23px 0; }
+.helpModal ol strong { color: #3e5035; }
+@media (max-width: 1200px) { .studentGrid { grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; } .mainColumn, .rightColumn { gap: 18px; } .hero { padding: 27px; } .heroArt { opacity: .6; right: -85px; } .heroCopy { max-width: 94%; } .desktopBreak { display: none; } .capacityCard { padding: 19px; } .dateLabel { font-size: 10px; } }
+@media (max-width: 1020px) { .studentGrid { grid-template-columns: 1fr; } .rightColumn { grid-template-columns: 1fr 1fr; } .hero { min-height: 350px; } .heroArt { opacity: 1; right: -15px; } .heroCopy { max-width: 75%; } .desktopBadge { display: none !important; } }
+@media (max-width: 720px) { .classLabel, .sidebarNote, .profile, .brandSub { display: none; } .rightColumn { grid-template-columns: 1fr; } .stepsCard { display: none; } .dateLabel { display: none; } .hero { min-height: 330px; padding: 26px; } .hero h2 { font-size: 39px; } .heroCopy { max-width: 100%; } .heroArt { opacity: .3; right: -100px; } .hero p { max-width: 300px; } .heroPill { font-size: 8px; } .hero .heroFootnote { font-size: 9px; } .passCard { padding: 23px; } .passCard h2 { font-size: 32px; } .passId { display: none; } .passActions { gap: 8px; } .passActions > button { flex: 1 1 auto; } .quizCard { padding: 20px; } .footer { flex-wrap: wrap; gap: 12px; } .footer > :last-child { display: none; } .alertToggle > span { display: none; } .tripTimer span { font-size: 49px; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } .answer { transition: none; } }
