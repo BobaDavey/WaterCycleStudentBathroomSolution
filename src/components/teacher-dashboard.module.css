@@ -1,17 +1,20 @@
-.brandIcon { display: grid; place-items: center; width: 40px; height: 40px; color: #dce8b6; border: 1px solid #ffffff30; border-radius: 12px; }
-.brandSub { display: block; font-size: 7px; font-weight: 500; letter-spacing: .15em; margin-top: 4px; color: #9bb2a7; }
-.portalLabel { margin: 42px 20px 15px; font-size: 9px; letter-spacing: .16em; color: #97afa2; font-weight: 600; }
-.navDot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: #d4e5ac; }
-.sidebarNote { padding: 24px 20px; margin: auto 10px 25px; color: #c9d7cb; border: 1px solid #52736166; border-radius: 12px; background: linear-gradient(125deg,#ffffff07,transparent); }
-.sidebarNote svg { color: #d5e5a6; margin-bottom: 15px; }
+/* Keep the teacher profile and labels aligned within the shared navigation. */
+.teacherShell :global(.sidebar-bottom) { flex-direction: row; align-items: center; gap: 9px; padding-top: 18px; border-top: 1px solid #e1e7d7; }
+.teacherShell :global(.nav-item)>span:nth-child(2) { margin-left: 0; }
+.brandIcon { display: grid; place-items: center; width: 40px; height: 40px; color: #dce8b6; background: #245844; border: 1px solid #245844; border-radius: 12px; }
+.brandSub { display: block; font-size: 7px; font-weight: 500; letter-spacing: .15em; margin-top: 4px; color: #839575; }
+.portalLabel { margin: 42px 20px 15px; font-size: 9px; letter-spacing: .16em; color: #8a9b7d; font-weight: 600; }
+.navDot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: #94b36d; }
+.sidebarNote { padding: 24px 20px; margin: auto 10px 25px; color: #567046; border: 1px solid #dce4ce; border-radius: 12px; background: linear-gradient(125deg,#f0f4e6,#f8faf3); }
+.sidebarNote svg { color: #8da971; margin-bottom: 15px; }
 .sidebarNote strong { display: block; font-family: Georgia,serif; font-weight: 400; font-size: 23px; line-height: 1.2; letter-spacing: -.03em; }
-.sidebarNote p { font-size: 11px; line-height: 1.7; margin: 12px 0 0; color: #9bb2a7; }
+.sidebarNote p { font-size: 11px; line-height: 1.7; margin: 12px 0 0; color: #839575; }
 .teacherAvatar { background: #e6d2b4!important; color: #365144!important; flex: 0 0 35px; }
 .profileName { flex: 1; min-width: 0; }
 .profileName strong { font-size: 12px; font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profileName span { display: block; color: #94ad9d; font-size: 10px; margin-top: 4px; }
-.logout { background: transparent; color: #a9bfb2; border: 0; padding: 6px; cursor: pointer; border-radius: 6px; }
-.logout:hover { background: #ffffff12; color: white; }
+.profileName span { display: block; color: #8a9b7c; font-size: 10px; margin-top: 4px; }
+.logout { background: transparent; color: #718565; border: 0; padding: 6px; cursor: pointer; border-radius: 6px; }
+.logout:hover { background: #e9efdd; color: #3b6038; }
 .breadcrumb { color: #9a9d97; }
 .liveStatus { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #687568; }
 .liveStatus>span { width: 6px; height: 6px; border-radius: 50%; background: #65925f; box-shadow: 0 0 0 3px #60965410; }
@@ -103,7 +106,7 @@
 .emptyIcon { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; background: #f0f2e8; color: #8d9f7f; border-radius: 50%; margin-bottom: 12px; }
 .questionToolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 22px; flex-wrap: wrap; }
 .questionToolbar>.searchField { flex: 1; max-width: 430px; }
-.questionToolbar>.muted { font-size: 11px; margin-left: auto; }
+.questionToolbar>:global(.muted) { font-size: 11px; margin-left: auto; }
 .filterLabel { display: flex; align-items: center; gap: 8px; font-size: 10px; color: #7d8674; }
 .filterLabel :global(.select),.filterLabel :global(.input) { min-height: 39px; font-size: 11px; width: auto; }
 .questionGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
@@ -136,7 +139,7 @@
 .confirmCode { background: #fbf5e9; border: 1px solid #e6dac5; border-radius: 6px; padding: 14px; }
 .confirmCode>p { margin: 0 0 12px; font-size: 11px; line-height: 1.8; color: #938160; }
 .modal { max-width: 620px; }
-.modal>form>.muted { font-size: 12px; line-height: 1.8; margin-top: 0; margin-bottom: 20px; }
+.modal>form>:global(.muted) { font-size: 12px; line-height: 1.8; margin-top: 0; margin-bottom: 20px; }
 .usernamePreview { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-radius: 6px; background: #f4f6ec; margin-top: 18px; }
 .usernamePreview>span { font-size: 10px; color: #879278; }
 .usernamePreview code { color: #567247; font-size: 12px; }
@@ -158,6 +161,6 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 @media(min-width:1600px) { .overviewGrid { grid-template-columns: minmax(0,2fr) minmax(300px,1fr); }.learningCard h2 { font-size: 34px; }.learningCard p { max-width: 300px; font-size: 12px; }.bankCount { margin-top: 25px; }.capacitySlot { padding: 20px; min-height: 202px; } }
 @media(max-width:1150px) { .overviewGrid { grid-template-columns: minmax(0,1fr); }.overviewAside { grid-template-columns: 1fr 1fr; align-items: start; }.learningCard { grid-row: span 2; }.classroomCard { margin-top: 0; }.classLabel { max-width: 180px; overflow: hidden; white-space: nowrap; }.settingsGrid { gap: 16px; }.statCard { padding: 17px!important; }.statTop { gap: 7px; }.statTop :global(.stat-label) { font-size: 8px; } }
-@media(max-width:900px) { .sidebarNote,.portalLabel,.brandSub { display: none; }.profileName { display: none; }.teacherAvatar { flex-basis: 32px; }.logout { display: none; }.liveStatus,.headerDivider { display: none; }.brandIcon { width: 35px; height: 35px; }.questionGrid { grid-template-columns: minmax(0,1fr); }.settingsGrid { grid-template-columns: minmax(0,1fr); }.settingsGrid>section:last-child { grid-column: 1; }.pageHeading { gap: 15px; }.classCode { padding: 10px 12px; }.classCode>strong { font-size: 13px; }.rowActions { flex-wrap: wrap; }.statTop { flex-wrap: wrap; }.statTop :global(.stat-label) { width: 100%; margin-top: 6px; }.statNumber { margin-top: 10px; } }
-@media(max-width:650px) { .brandIcon { width: 30px; height: 30px; }.brandIcon svg { width: 20px; }.navDot { display: none; }.classLabel { font-size: 9px; max-width: 140px; }.breadcrumb { display: none; }.pageHeading { align-items: flex-start; flex-wrap: wrap; }.classCode { margin-top: 4px; }.classCode>span { font-size: 7px; }.capacitySlots { padding: 0 15px 15px; gap: 9px; }.capacitySlot { padding: 12px 11px; }.slotHeading { flex-direction: column; align-items: flex-start; gap: 7px; margin-bottom: 16px; }.slotEmpty .slotHeading { align-items: center; }.slotStudent { flex-direction: column; align-items: flex-start; gap: 8px; }.slotStudent h3 { font-size: 12px; }.slotTime { font-size: 8px; flex-wrap: wrap; }.slotAction { font-size: 9px; }.emptySlotIcon { margin-top: 6px; }.slotEmpty h3 { font-size: 10px; }.slotEmpty p { font-size: 8px; }.queueArea { padding: 15px; }.overviewAside { grid-template-columns: minmax(0,1fr); }.learningCard { grid-row: auto; }.learningCard h2 { font-size: 30px; }.learningCard p { max-width: 100%; padding-right: 30px; }.bankCount { margin: 15px 0; }.leafArt { top: 50px; right: 7px; }.pageFooter { align-items: flex-start; }.pageFooter>span:last-child { display: none; }.statTop :global(.stat-label) { font-size: 7px; letter-spacing: .07em; }.statCard { padding: 15px!important; }.statNumber { gap: 5px; }.statBadge { font-size: 8px!important; padding: 3px 5px; }.listHeader .searchField { width: 100%; }.historyHeader .searchField { flex: 1; }.filterLabel { flex-wrap: wrap; }.questionToolbar { gap: 10px; }.questionToolbar>.searchField { max-width: 100%; width: 100%; flex-basis: 100%; }.questionToolbar>.muted { margin-left: 0; font-size: 10px; }.searchField { min-width: 0; }.questionCard { padding: 16px; }.settingsForm { padding: 0 17px 17px; }.largeCode strong { font-size: 22px; }.usernamePreview { flex-wrap: wrap; gap: 10px; }.queueHeading>span { font-size: 8px; }.learningTag { font-size: 8px; } }
+@media(max-width:900px) { .sidebarNote,.portalLabel,.brandSub { display: none; }.profileName { display: none; }.teacherAvatar { flex-basis: 32px; }.logout { display: inline-flex; }.liveStatus,.headerDivider { display: none; }.brandIcon { width: 35px; height: 35px; }.questionGrid { grid-template-columns: minmax(0,1fr); }.settingsGrid { grid-template-columns: minmax(0,1fr); }.settingsGrid>section:last-child { grid-column: 1; }.pageHeading { gap: 15px; }.classCode { padding: 10px 12px; }.classCode>strong { font-size: 13px; }.rowActions { flex-wrap: wrap; }.statTop { flex-wrap: wrap; }.statTop :global(.stat-label) { width: 100%; margin-top: 6px; }.statNumber { margin-top: 10px; } }
+@media(max-width:640px) { .teacherShell :global(.sidebar-bottom) { padding-top: 0; border-top: 0; }  .brandIcon { width: 30px; height: 30px; }.brandIcon svg { width: 20px; }.navDot { display: none; }.classLabel { font-size: 9px; max-width: 140px; }.breadcrumb { display: none; }.pageHeading { align-items: flex-start; flex-wrap: wrap; }.classCode { margin-top: 4px; }.classCode>span { font-size: 7px; }.capacitySlots { padding: 0 15px 15px; gap: 9px; }.capacitySlot { padding: 12px 11px; }.slotHeading { flex-direction: column; align-items: flex-start; gap: 7px; margin-bottom: 16px; }.slotEmpty .slotHeading { align-items: center; }.slotStudent { flex-direction: column; align-items: flex-start; gap: 8px; }.slotStudent h3 { font-size: 12px; }.slotTime { font-size: 8px; flex-wrap: wrap; }.slotAction { font-size: 9px; }.emptySlotIcon { margin-top: 6px; }.slotEmpty h3 { font-size: 10px; }.slotEmpty p { font-size: 8px; }.queueArea { padding: 15px; }.overviewAside { grid-template-columns: minmax(0,1fr); }.learningCard { grid-row: auto; }.learningCard h2 { font-size: 30px; }.learningCard p { max-width: 100%; padding-right: 30px; }.bankCount { margin: 15px 0; }.leafArt { top: 50px; right: 7px; }.pageFooter { align-items: flex-start; }.pageFooter>span:last-child { display: none; }.statTop :global(.stat-label) { font-size: 7px; letter-spacing: .07em; }.statCard { padding: 15px!important; }.statNumber { gap: 5px; }.statBadge { font-size: 8px!important; padding: 3px 5px; }.listHeader .searchField { width: 100%; }.historyHeader .searchField { flex: 1; }.filterLabel { flex-wrap: wrap; }.questionToolbar { gap: 10px; }.questionToolbar>.searchField { max-width: 100%; width: 100%; flex-basis: 100%; }.questionToolbar>:global(.muted) { margin-left: 0; font-size: 10px; }.searchField { min-width: 0; }.questionCard { padding: 16px; }.settingsForm { padding: 0 17px 17px; }.largeCode strong { font-size: 22px; }.usernamePreview { flex-wrap: wrap; gap: 10px; }.queueHeading>span { font-size: 8px; }.learningTag { font-size: 8px; } }
 @media(prefers-reduced-motion:reduce) { .spinning { animation: none; } }
