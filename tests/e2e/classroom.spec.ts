@@ -73,7 +73,7 @@ test('first-time student signup can sign back in using first+last username', asy
   await page.getByRole('button', { name: /Create a student account/ }).click();
   await page.getByLabel('First name', { exact: true }).fill('Robin');
   await page.getByLabel('Last name', { exact: true }).fill(lastName);
-  await page.getByLabel('Classroom code').fill('BIO2026');
+  await page.getByLabel('Classroom code').fill('01001');
   await page.getByLabel('Password', { exact: true }).fill('MyBiology2026!');
   await page.getByRole('button', { name: 'Create my account' }).click();
   await expect(page.getByRole('heading', { name: /Hey, Robin/ })).toBeVisible();
@@ -100,7 +100,8 @@ test('teacher manages a roster account and question bank, then exports trip hist
   const studentUsername = `rosa${surname}`.toLowerCase();
   try {
     await login(page, 'morganreed', 'WaterCycle2026!', true);
-    await page.getByRole('button', { name: 'Student roster', exact: true }).click();
+    await page.getByRole('button', { name: 'Class Roster', exact: true }).click();
+    await page.getByRole('article').filter({ hasText: '01001' }).getByRole('button', { name: 'View Class', exact: true }).click();
     await page.getByRole('button', { name: 'Add student', exact: true }).click();
     let dialog = page.getByRole('dialog');
     await dialog.getByLabel('First name', { exact: true }).fill('Rosa');
@@ -117,7 +118,7 @@ test('teacher manages a roster account and question bank, then exports trip hist
       await claim.getByRole('button', { name: /Create a student account/ }).click();
       await claim.getByLabel('First name', { exact: true }).fill('Rosa');
       await claim.getByLabel('Last name', { exact: true }).fill(surname);
-      await claim.getByLabel('Classroom code').fill('BIO2026');
+      await claim.getByLabel('Classroom code').fill('01001');
       await claim.getByLabel('Password', { exact: true }).fill('FirstBiology2026!');
       await claim.getByRole('button', { name: 'Create my account' }).click();
       await expect(claim.getByRole('heading', { name: /Hey, Rosa/ })).toBeVisible();

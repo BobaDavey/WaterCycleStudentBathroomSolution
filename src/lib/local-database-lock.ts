@@ -11,6 +11,11 @@ async function alive(owner: Owner) {
  try { process.kill(owner.pid,0); } catch(error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
  const boot = (await readText('/proc/sys/kernel/random/boot_id'))?.trim() ?? null;
  if (boot && owner.boot && boot !== owner.boot) return false;
+ // A terminated child can remain in /proc until its parent reaps it. It has
+ // closed its files and cannot own a database, although kill(pid, 0) succeeds.
+ const stat = await readText(`/proc/${owner.pid}/stat`);
+ const state = stat?.slice(stat.lastIndexOf(')')+2).split(' ')[0];
+ if (state === 'Z' || state === 'X') return false;
  const start = await fingerprint(owner.pid);
  return !start || !owner.start || start === owner.start;
 }

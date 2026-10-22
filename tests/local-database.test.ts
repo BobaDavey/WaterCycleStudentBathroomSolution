@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, access } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, access, readFile } from 'node:fs/promises';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import path from 'node:path';
 import { createDatabase } from '../src/lib/db';
+import { lockLocalDatabase } from '../src/lib/local-database-lock';
 
 test('persistent local database refuses a second opener, saves data, and releases its lock on close',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'watercycle-lock-'));
@@ -34,4 +36,32 @@ test('reclaims a valid lock left by a dead process or restored snapshot',async()
   await db.close();
   await assert.rejects(access(`${directory}.watercycle.lock`));
  } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test('reclaims a terminated Linux owner even while its parent has not reaped it', {skip: process.platform !== 'linux', timeout: 10000}, async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'watercycle-zombie-'));
+ const directory=path.join(root,'data');
+ const parent=spawn(process.execPath,['-e',`const child=require('node:child_process').spawn(process.execPath,['-e','process.exit(0)'],{stdio:'ignore'});process.stdout.write(String(child.pid)+'\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,8000);`],{stdio:['ignore','pipe','pipe']});
+ try {
+  const [data]=await once(parent.stdout,'data');
+  const pid=Number(String(data).trim());
+  let fields:string[]=[];
+  for(let attempt=0;attempt<100;attempt++) {
+   const stat=await readFile(`/proc/${pid}/stat`,'utf8');
+   fields=stat.slice(stat.lastIndexOf(')')+2).split(' ');
+   if(fields[0]==='Z') break;
+   await new Promise(resolve=>setTimeout(resolve,20));
+  }
+  assert.equal(fields[0],'Z','fixture must be a terminated, unreaped process');
+  const boot=(await readFile('/proc/sys/kernel/random/boot_id','utf8')).trim();
+  await writeFile(`${directory}.watercycle.lock`,JSON.stringify({pid,token:'terminated-owner',boot,start:fields[19]}));
+  const release=await lockLocalDatabase(directory);
+  await release();
+  await assert.rejects(access(`${directory}.watercycle.lock`));
+ } finally {
+  const exited=once(parent,'exit');
+  parent.kill('SIGKILL');
+  await exited;
+  await rm(root,{recursive:true,force:true});
+ }
 });
