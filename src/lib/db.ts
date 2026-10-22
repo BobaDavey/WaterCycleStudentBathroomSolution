@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { lockLocalDatabase } from './local-database-lock';
 
 export interface SQL { query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>; }
 export interface Database extends SQL { transaction<T>(fn: (tx: SQL) => Promise<T>): Promise<T>; close(): Promise<void>; }
@@ -60,12 +61,27 @@ export async function createDatabase(options: { url?: string; directory?: string
  }
  const directory = options.directory ?? path.join(process.cwd(), '.local', 'data');
  if (directory !== 'memory://') await mkdir(directory, { recursive: true });
+ const release = directory === 'memory://' ? async () => {} : await lockLocalDatabase(directory);
  const db = new PGlite(directory);
- await db.exec(schema);
+ let closing: Promise<void> | undefined;
+ const close = () => closing ??= (async () => {
+  try { await db.close(); } finally {
+   process.removeListener('SIGTERM',onTerm);
+   process.removeListener('SIGINT',onInt);
+   await release();
+  }
+ })();
+ const onTerm = () => { process.exitCode=143; void close().catch(()=>{}); };
+ const onInt = () => { process.exitCode=130; void close().catch(()=>{}); };
+ if (directory !== 'memory://') {
+  process.prependListener('SIGTERM',onTerm);
+  process.prependListener('SIGINT',onInt);
+ }
+ try { await db.exec(schema); } catch(error) { await close().catch(()=>{}); throw error; }
  return {
   async query<T>(sql: string, params: unknown[] = []) { const result = await db.query<T>(sql, params); return { rows: result.rows }; },
   async transaction<T>(fn: (tx: SQL) => Promise<T>) { return db.transaction(async tx => fn({ async query<T>(sql: string, params: unknown[] = []) { const result = await tx.query<T>(sql, params); return { rows: result.rows }; } })); },
-  async close() { await db.close(); }
+  async close() { await close(); }
  };
 }
 
