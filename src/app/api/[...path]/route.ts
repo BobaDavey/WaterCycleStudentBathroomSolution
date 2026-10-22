@@ -4,12 +4,13 @@ import { getDatabase } from '@/lib/db';
 import { AppError, cookieName, createSession, digest, rateLimit, sessionUser } from '@/lib/auth';
 import { WaterCycle, classroomSchema, loginSchema, passwordSchema, questionSchema, requirePasswordChange, rosterSchema, rosterUpdateSchema, setupSchema, signupSchema, submitSchema } from '@/lib/domain';
 import type { User } from '@/lib/contracts';
+import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
 const ok = () => NextResponse.json({ok:true});
 function cookie(response: NextResponse, token:string, request:NextRequest) {
- response.cookies.set(cookieName,token,{httpOnly:true,secure:request.nextUrl.protocol==='https:',sameSite:'lax',path:'/',maxAge:7*86400});
+ response.cookies.set(cookieName,token,{httpOnly:true,secure:usesSecureCookie(request.headers.get('origin'),request.nextUrl.protocol,process.env.VERCEL==='1'),sameSite:'lax',path:'/',maxAge:7*86400});
  return response;
 }
 async function handle(request:NextRequest, context:Context) {
@@ -17,7 +18,7 @@ async function handle(request:NextRequest, context:Context) {
   if (!['GET','HEAD'].includes(request.method)) {
    const origin=request.headers.get('origin');
    // Same-origin browser requests only; origin-less non-browser clients must explicitly send this header too.
-   if (!origin || origin !== request.nextUrl.origin) throw new AppError(403,'This request must come from the app’s own page. Please refresh and try again.');
+   if (!isSameOrigin(origin,request.headers.get('host'),process.env.VERCEL==='1')) throw new AppError(403,'This request must come from the app’s own page. Please refresh and try again.');
    const type=request.headers.get('content-type') || '';
    if (request.method !== 'DELETE' && !type.includes('application/json')) throw new AppError(415,'Please send JSON.');
    if (Number(request.headers.get('content-length') || 0)>32768) throw new AppError(413,'This request is too large.');
@@ -56,7 +57,7 @@ async function handle(request:NextRequest, context:Context) {
   }
   if (route==='auth/logout' && method==='POST') {
    if (token) await db.query('DELETE FROM sessions WHERE token_hash=$1',[digest(token)]);
-   const response=ok(); response.cookies.set(cookieName,'',{httpOnly:true,path:'/',maxAge:0,sameSite:'lax',secure:request.nextUrl.protocol==='https:'}); return response;
+   const response=ok(); response.cookies.set(cookieName,'',{httpOnly:true,path:'/',maxAge:0,sameSite:'lax',secure:usesSecureCookie(request.headers.get('origin'),request.nextUrl.protocol,process.env.VERCEL==='1')}); return response;
   }
   user=await authenticated();
   if (route==='auth/password' && method==='POST') {
