@@ -28,7 +28,7 @@ async function requestPass(page: Page, questions: Question[]) {
     expect(answer).toBeTruthy();
     await page.locator('fieldset').getByRole('radio').nth(answer.correctIndex).check();
     const checked = page.waitForResponse(r => r.url().endsWith('/api/student/quiz/answer') && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Check Answer', exact: true }).click();
+    await page.getByRole('button', { name: 'Check my answer', exact: true }).click();
     const result = await (await checked).json() as QuizResult;
     expect(result.correctCount).toBe(i + 1);
     expect(result.passed).toBe(i === 1);
@@ -36,6 +36,7 @@ async function requestPass(page: Page, questions: Question[]) {
       expect(result.visit).toBeUndefined();
       expect(result.quiz).toBeTruthy();
       quiz = result.quiz!;
+      await page.getByRole('button', { name: 'Next question', exact: true }).click();
     }
   }
 }
