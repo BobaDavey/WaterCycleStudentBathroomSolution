@@ -126,7 +126,7 @@ test('version two preserves numeric codes, users, departures, and history while 
   await db.query("INSERT INTO quizzes(id,student_id,classroom_id,questions,expires_at,purpose,correct_count,current_index,question_token,seen_question_ids,answer_history,visit_id) VALUES('new-quiz','new-student','legacy-class','[]',CURRENT_TIMESTAMP+INTERVAL '5 minutes','restroom',1,2,'presentation-token','[\"question-one\"]','[{\"correct\":true}]','active-trip')");
   await migrateLegacy(db);
   assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2}]);
-  assert.deepEqual((await db.query("SELECT ready_expires_at FROM visits WHERE id='ready-trip'")).rows[0].ready_expires_at,ready.ready_expires_at);
+  assert.deepEqual((await db.query<{ready_expires_at:Date|null}>("SELECT ready_expires_at FROM visits WHERE id='ready-trip'")).rows[0].ready_expires_at,ready.ready_expires_at);
   assert.equal((await db.query<{used:boolean}>("SELECT used FROM quizzes WHERE id='new-quiz'")).rows[0].used,false);
   assert.equal((await db.query<{tutorial_completed:boolean}>("SELECT tutorial_completed FROM users WHERE id='new-student'")).rows[0].tutorial_completed,true);
   assert.equal((await db.query<{purpose:string}>("SELECT purpose FROM visits WHERE id='active-trip'")).rows[0].purpose,'water');
