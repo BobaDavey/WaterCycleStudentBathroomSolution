@@ -1,0 +1,32 @@
+{
+  "name": "watercycle",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "lucide-react": "^0.468.0",
+    "next": "^16.0.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.5",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
