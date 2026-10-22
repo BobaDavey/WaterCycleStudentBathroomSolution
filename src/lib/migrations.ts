@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, attempts INTEGER N
 CREATE TABLE IF NOT EXISTS watercycle_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 `;
 
-const multiTeacherMigration = `
+export const multiTeacherMigration = `
 ALTER TABLE users ALTER COLUMN classroom_id DROP NOT NULL;
 ALTER TABLE users ADD COLUMN email TEXT;
 ALTER TABLE users DROP CONSTRAINT users_role_check;
@@ -89,6 +89,35 @@ END $$;
 CREATE TRIGGER protect_watercycle_administrator BEFORE UPDATE OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION protect_watercycle_administrator();
 `;
 
+const studentBreakMigration = `
+ALTER TABLE classrooms DROP CONSTRAINT classrooms_code_format;
+ALTER TABLE classrooms ADD CONSTRAINT classrooms_code_format CHECK(code IS NULL OR code COLLATE "C" ~ '^[A-Z0-9]{5}$');
+CREATE FUNCTION normalize_watercycle_class_code() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.code IS NOT NULL THEN
+  IF NEW.code COLLATE "C" !~ '^[A-Za-z0-9]{5}$' THEN
+   RAISE EXCEPTION 'Class codes must contain exactly five English letters or numbers.' USING ERRCODE='23514';
+  END IF;
+  NEW.code=UPPER(NEW.code COLLATE "C");
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER normalize_watercycle_class_code BEFORE INSERT OR UPDATE OF code ON classrooms FOR EACH ROW EXECUTE FUNCTION normalize_watercycle_class_code();
+ALTER TABLE users ADD COLUMN tutorial_completed BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE visits ADD COLUMN purpose TEXT CHECK(purpose IN ('restroom','water'));
+ALTER TABLE visits ADD COLUMN ready_expires_at TIMESTAMPTZ;
+ALTER TABLE visits ADD COLUMN warning_acknowledged_at TIMESTAMPTZ;
+UPDATE visits SET ready_expires_at=CURRENT_TIMESTAMP+INTERVAL '120 seconds' WHERE status='ready';
+ALTER TABLE quizzes ADD COLUMN purpose TEXT CHECK(purpose IN ('restroom','water'));
+ALTER TABLE quizzes ADD COLUMN correct_count INTEGER NOT NULL DEFAULT 0 CHECK(correct_count BETWEEN 0 AND 2);
+ALTER TABLE quizzes ADD COLUMN current_index INTEGER NOT NULL DEFAULT 0 CHECK(current_index>=0);
+ALTER TABLE quizzes ADD COLUMN question_token TEXT;
+ALTER TABLE quizzes ADD COLUMN seen_question_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE quizzes ADD COLUMN answer_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE quizzes ADD COLUMN visit_id TEXT REFERENCES visits(id);
+UPDATE quizzes SET used=TRUE WHERE used=FALSE;
+`;
+
 /** Caller holds the PostgreSQL initialization lock and transaction. */
 export async function migrateDatabase(tx: SQL, execute: (sql:string) => Promise<void>): Promise<void> {
  await execute(baselineSchema);
@@ -96,5 +125,9 @@ export async function migrateDatabase(tx: SQL, execute: (sql:string) => Promise<
  if (!rows.some(row => Number(row.version) === 1)) {
   await execute(multiTeacherMigration);
   await tx.query('INSERT INTO watercycle_migrations(version) VALUES(1)');
+ }
+ if (!rows.some(row => Number(row.version) === 2)) {
+  await execute(studentBreakMigration);
+  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(2)');
  }
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { createDatabase, type SQL } from '../src/lib/db';
-import { baselineSchema, migrateDatabase } from '../src/lib/migrations';
+import { baselineSchema, multiTeacherMigration, migrateDatabase } from '../src/lib/migrations';
 import { ADMIN_USERNAME, bootstrapAdministrator } from '../src/lib/bootstrap-admin';
 import { hashPassword, verifyPassword, userFrom } from '../src/lib/auth';
 
@@ -39,7 +39,7 @@ test('migrates original records and ownership without replacing identities, pass
   assert.equal((await db.query<{classroom_id:string}>("SELECT classroom_id FROM quizzes WHERE id='legacy-quiz'")).rows[0].classroom_id,'legacy-class');
   assert.deepEqual((await db.query('SELECT student_id,classroom_id,active FROM enrollments')).rows,[{student_id:'legacy-student',classroom_id:'legacy-class',active:true}]);
   await migrateLegacy(db);
-  assert.equal((await db.query('SELECT * FROM watercycle_migrations')).rows.length,1);
+  assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2}]);
   assert.equal((await db.query('SELECT * FROM enrollments')).rows.length,1);
   assert.equal((await db.query('SELECT * FROM visits')).rows.length,1);
   await db.query("UPDATE classrooms SET code='00123' WHERE id='legacy-class'");
@@ -59,12 +59,19 @@ test('rolls back an ambiguous legacy ownership migration without losing records'
  } finally {await db.close();}
 });
 
-test('database enforces five digits, leading zeros, active-code uniqueness, and required ownership',async()=>{
+test('database normalizes five-character English alphanumeric codes and enforces active uniqueness',async()=>{
  const db=await createDatabase({directory:'memory://',bootstrapAdmin:false});
  try {
   await db.query("INSERT INTO users(id,role,first_name,last_name,username) VALUES('teacher','teacher','Test','Teacher','codeteacher')");
   await db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('one','teacher','First','00123')");
-  for (const code of ['1234','123456','ABCDE','12.34',' 1234']) await assert.rejects(db.query('INSERT INTO classrooms(id,teacher_id,name,code) VALUES($1,$2,$3,$4)',[randomUUID(),'teacher','Invalid',code]));
+  for (const code of ['ABCDE','BIO01','9ABC2','12345']) await db.query('INSERT INTO classrooms(id,teacher_id,name,code) VALUES($1,$2,$3,$4)',[randomUUID(),'teacher','Valid',code]);
+  await db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('letters','teacher','Letters','ab123')");
+  assert.equal((await db.query<{code:string}>("SELECT code FROM classrooms WHERE id='letters'")).rows[0].code,'AB123');
+  await db.query("UPDATE classrooms SET code='abC02' WHERE id='letters'");
+  assert.equal((await db.query<{code:string}>("SELECT code FROM classrooms WHERE id='letters'")).rows[0].code,'ABC02');
+  for (const code of ['1234','123456','12.34',' 1234','AB@12','ß123','İB123','éB123','ＡB123','']) await assert.rejects(db.query('INSERT INTO classrooms(id,teacher_id,name,code) VALUES($1,$2,$3,$4)',[randomUUID(),'teacher','Invalid',code]));
+  await assert.rejects(db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('case-duplicate','teacher','Duplicate','aBc02')"));
+  await assert.rejects(db.query("UPDATE classrooms SET code='bIo01' WHERE id='letters'"));
   await assert.rejects(db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('two','teacher','Second','00123')"));
   await assert.rejects(db.query("INSERT INTO classrooms(id,name,code) VALUES('ownerless','No teacher','00999')"));
   await assert.rejects(db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('no-code','teacher','No code',NULL)"));
@@ -72,6 +79,75 @@ test('database enforces five digits, leading zeros, active-code uniqueness, and 
   await db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('two','teacher','Second','00123')");
   await assert.rejects(db.query("UPDATE classrooms SET archived=FALSE WHERE id='one'"));
   assert.equal((await db.query<{code:string}>("SELECT code FROM classrooms WHERE id='two'")).rows[0].code,'00123');
+ } finally {await db.close();}
+});
+
+test('version two preserves numeric codes, users, departures, and history while safely upgrading pending work',async()=>{
+ const {db,oldHash}=await legacy();
+ try {
+  // Recreate the previous deployed schema independently of the new migration.
+  await db.exec(multiTeacherMigration);
+  await db.query('INSERT INTO watercycle_migrations(version) VALUES(1)');
+  await db.query("UPDATE classrooms SET code='00123' WHERE id='legacy-class'");
+  await db.query("INSERT INTO users(id,role,first_name,last_name,username,password_hash) VALUES('existing-admin','admin','Existing','Administrator',$1,$2)",[ADMIN_USERNAME,oldHash]);
+  await db.query("INSERT INTO users(id,role,first_name,last_name,username,classroom_id) VALUES('ready-student','student','Ready','Student','readystudent','legacy-class'),('waiting-student','student','Waiting','Student','waitingstudent','legacy-class')");
+  await db.query("INSERT INTO visits(id,classroom_id,student_id,status,requested_at,ready_at,left_at) VALUES('active-trip','legacy-class','legacy-student','out','2026-01-02T09:00:00Z','2026-01-02T09:01:00Z','2026-01-02T09:02:00Z'),('ready-trip','legacy-class','ready-student','ready','2026-01-02T09:03:00Z','2026-01-02T09:04:00Z',NULL),('waiting-trip','legacy-class','waiting-student','waiting','2026-01-02T09:05:00Z',NULL,NULL)");
+  const oldTrips=(await db.query<Record<string,unknown>>('SELECT id,status,requested_at,ready_at,left_at,returned_at FROM visits ORDER BY id')).rows;
+  const oldQuiz=(await db.query<Record<string,unknown>>("SELECT * FROM quizzes WHERE id='legacy-quiz'")).rows[0];
+  const started=Date.now();
+  await migrateLegacy(db);
+  const finished=Date.now();
+  assert.equal((await db.query<{code:string}>('SELECT code FROM classrooms')).rows[0].code,'00123');
+  assert.deepEqual((await db.query('SELECT id,status,requested_at,ready_at,left_at,returned_at FROM visits ORDER BY id')).rows,oldTrips);
+  const users=(await db.query<Record<string,unknown>>('SELECT * FROM users')).rows;
+  assert.equal(users.length,5);
+  assert.ok(users.every(user=>user.tutorial_completed===true));
+  assert.equal(users.find(user=>user.id==='legacy-student')?.password_hash,oldHash);
+  assert.equal(users.find(user=>user.id==='existing-admin')?.password_hash,oldHash);
+  assert.equal(userFrom(users.find(user=>user.id==='legacy-student')!).tutorialCompleted,true);
+  const visits=(await db.query<Record<string,unknown>>('SELECT * FROM visits ORDER BY id')).rows;
+  assert.ok(visits.every(visit=>visit.purpose===null&&visit.warning_acknowledged_at===null));
+  const ready=visits.find(visit=>visit.id==='ready-trip')!;
+  const expiry=ready.ready_expires_at instanceof Date?ready.ready_expires_at.getTime():Date.parse(String(ready.ready_expires_at));
+  assert.ok(expiry>=started+120000&&expiry<=finished+120000);
+  assert.ok(visits.filter(visit=>visit.status!=='ready').every(visit=>visit.ready_expires_at===null));
+  const quiz=(await db.query<Record<string,unknown>>("SELECT * FROM quizzes WHERE id='legacy-quiz'")).rows[0];
+  assert.equal(quiz.used,true);
+  assert.deepEqual(quiz.questions,oldQuiz.questions);
+  assert.deepEqual(quiz.expires_at,oldQuiz.expires_at);
+  assert.equal(quiz.classroom_id,'legacy-class');
+  assert.equal(quiz.purpose,null);assert.equal(quiz.correct_count,0);assert.equal(quiz.current_index,0);
+  assert.equal(quiz.question_token,null);assert.equal(quiz.visit_id,null);
+  assert.deepEqual(quiz.seen_question_ids,[]);assert.deepEqual(quiz.answer_history,[]);
+  await db.query("INSERT INTO users(id,role,first_name,last_name,username,tutorial_completed) VALUES('new-student','student','New','Student','newstudent',FALSE)");
+  assert.equal(userFrom((await db.query<Record<string,unknown>>("SELECT * FROM users WHERE id='new-student'")).rows[0]).tutorialCompleted,false);
+  await db.query("UPDATE users SET tutorial_completed=TRUE WHERE id='new-student'");
+  await db.query("UPDATE visits SET purpose='water',warning_acknowledged_at=CURRENT_TIMESTAMP WHERE id='active-trip'");
+  await db.query("INSERT INTO quizzes(id,student_id,classroom_id,questions,expires_at,purpose,correct_count,current_index,question_token,seen_question_ids,answer_history,visit_id) VALUES('new-quiz','new-student','legacy-class','[]',CURRENT_TIMESTAMP+INTERVAL '5 minutes','restroom',1,2,'presentation-token','[\"question-one\"]','[{\"correct\":true}]','active-trip')");
+  await migrateLegacy(db);
+  assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2}]);
+  assert.deepEqual((await db.query("SELECT ready_expires_at FROM visits WHERE id='ready-trip'")).rows[0].ready_expires_at,ready.ready_expires_at);
+  assert.equal((await db.query<{used:boolean}>("SELECT used FROM quizzes WHERE id='new-quiz'")).rows[0].used,false);
+  assert.equal((await db.query<{tutorial_completed:boolean}>("SELECT tutorial_completed FROM users WHERE id='new-student'")).rows[0].tutorial_completed,true);
+  assert.equal((await db.query<{purpose:string}>("SELECT purpose FROM visits WHERE id='active-trip'")).rows[0].purpose,'water');
+  await assert.rejects(db.query("UPDATE users SET enabled=FALSE WHERE id='existing-admin'"));
+ } finally {await db.close();}
+});
+
+test('database rejects invalid break purposes and impossible cumulative quiz progress',async()=>{
+ const db=await createDatabase({directory:'memory://',bootstrapAdmin:false});
+ try {
+  await db.query("INSERT INTO users(id,role,first_name,last_name,username) VALUES('teacher','teacher','Break','Teacher','breakteacher'),('student','student','Break','Student','breakstudent')");
+  await db.query("INSERT INTO classrooms(id,teacher_id,name,code) VALUES('class','teacher','Biology','bio01')");
+  await db.query("INSERT INTO visits(id,classroom_id,student_id,status,purpose) VALUES('trip','class','student','returned','restroom')");
+  await assert.rejects(db.query("UPDATE visits SET purpose='other' WHERE id='trip'"));
+  await db.query("INSERT INTO quizzes(id,student_id,classroom_id,questions,expires_at,purpose) VALUES('quiz','student','class','[]',CURRENT_TIMESTAMP+INTERVAL '15 minutes','water')");
+  for(const count of [-1,3]) await assert.rejects(db.query("UPDATE quizzes SET correct_count=$1 WHERE id='quiz'",[count]));
+  await assert.rejects(db.query("UPDATE quizzes SET current_index=-1 WHERE id='quiz'"));
+  await assert.rejects(db.query("UPDATE quizzes SET purpose='other' WHERE id='quiz'"));
+  await assert.rejects(db.query("UPDATE quizzes SET visit_id='missing-visit' WHERE id='quiz'"));
+  await db.query("UPDATE quizzes SET correct_count=2,current_index=4,visit_id='trip' WHERE id='quiz'");
+  assert.deepEqual((await db.query("SELECT purpose,correct_count,current_index,visit_id FROM quizzes WHERE id='quiz'")).rows[0],{purpose:'water',correct_count:2,current_index:4,visit_id:'trip'});
  } finally {await db.close();}
 });
 
