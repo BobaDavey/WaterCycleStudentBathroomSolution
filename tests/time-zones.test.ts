@@ -6,7 +6,7 @@ import { createDatabase, type Database } from '../src/lib/db';
 import { userFrom } from '../src/lib/auth';
 import { classroomFrom } from '../src/lib/domain';
 import type { User } from '../src/lib/contracts';
-import { DEFAULT_TIME_ZONE, US_TIME_ZONES, effectiveTimeZone, formatClassTimestamp, classDateKey } from '../src/lib/time-zones';
+import { DEFAULT_TIME_ZONE, US_TIME_ZONES, effectiveTimeZone, formatClassTimestamp, classDateKey, timeZoneLabel } from '../src/lib/time-zones';
 import { duration } from '../src/lib/client';
 import { approveStudent } from './student-fixtures';
 
@@ -18,6 +18,12 @@ test('seven U.S. zones use the requested order and Eastern defaults without repl
  for(const time_zone of [undefined,null,''])assert.equal(classroomFrom({time_zone}).timeZone,DEFAULT_TIME_ZONE);
 });
 const hours=(value:string,zone:string)=>formatClassTimestamp(value,zone,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'},'en-US');
+test('friendly labels cover all seven U.S. zones, default to Eastern and preserve legacy preferences',()=>{
+ const labels=['USA / Eastern','USA / Central','USA / Mountain','USA / Pacific','USA / Alaska','USA / Hawaii','USA / Arizona Mountain'];
+ assert.deepEqual(US_TIME_ZONES.map(zone=>timeZoneLabel(zone.value)),labels);
+ for(const missing of [undefined,null,'','invalid-zone'])assert.equal(timeZoneLabel(missing),'USA / Eastern');
+ assert.equal(timeZoneLabel('Europe/London'),'Europe/London');
+});
 test('IANA rules apply U.S. daylight saving and keep Hawaii and Arizona on standard time',()=>{
  const winter=['07:00','06:00','05:00','04:00','03:00','02:00','05:00'];
  const summer=['08:00','07:00','06:00','05:00','04:00','02:00','05:00'];

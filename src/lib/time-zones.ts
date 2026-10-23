@@ -8,6 +8,7 @@ export const US_TIME_ZONES = [
  {label:'USA / Hawaii',value:'Pacific/Honolulu'},
  {label:'USA / Arizona Mountain',value:'America/Phoenix'},
 ] as const;
+const zoneLabels = new Map<string,string>(US_TIME_ZONES.map(zone=>[zone.value,zone.label.replace(' (Default)','')]));
 const knownZones = new Map<string,string>(US_TIME_ZONES.map(zone=>[zone.value,zone.value]));
 const formats = new Map<string,Intl.DateTimeFormat>();
 
@@ -18,6 +19,11 @@ export function effectiveTimeZone(value?: string | null): string {
   try{new Intl.DateTimeFormat('en-US',{timeZone:value});knownZones.set(value,value);return value;}catch{}
  }
  return DEFAULT_TIME_ZONE;
+}
+/** Friendly display text only; keep the IANA value for storage and calculations. */
+export function timeZoneLabel(value?: string | null): string {
+ const zone=effectiveTimeZone(value);
+ return zoneLabels.get(zone) ?? zone;
 }
 function dateFormatter(zone: string | null | undefined, options: Intl.DateTimeFormatOptions, locale?: string) {
  const timeZone=effectiveTimeZone(zone),key=JSON.stringify([locale,timeZone,options]);

@@ -93,7 +93,8 @@ test('Rule Offenders uses existing history with search, class filters, local tim
   expect((await page.request.get('/api/admin/violations')).status()).toBe(403);
   await page.getByLabel('Filter rule offenders by class',{exact:true}).selectOption(one.id);
   await expect(rows).toHaveCount(2);
-  await expect(region).toContainText('America/New_York');
+  await expect(region).toContainText('USA / Eastern');
+  await expect(region).not.toContainText('America/New_York');
   const api=await(await page.request.get(`/api/teacher/violations?classroomId=${one.id}`)).json() as RuleOffendersState;
   const local=new Intl.DateTimeFormat('en-US',{timeZone:one.timeZone,dateStyle:'medium',timeStyle:'short'}).format(new Date(api.violations[0].violatedAt));
   await expect(rows.first().locator('time')).toHaveText(local);

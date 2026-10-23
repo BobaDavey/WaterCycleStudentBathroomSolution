@@ -19,9 +19,16 @@ test('create/edit menus save all seven U.S. zones in order, default Eastern, and
   await dialog.getByLabel('Class name',{exact:true}).fill(`US time zone ${index}`);await dialog.getByLabel('Enrollment code',{exact:true}).fill(`TZ00${index}`);
   await select.selectOption(zone.value);await scheduleClassForm(page);await dialog.getByRole('button',{name:'Create Class',exact:true}).click();await expect(dialog).not.toBeVisible();
   const card=page.getByRole('article').filter({has:page.getByRole('heading',{name:`US time zone ${index}`,exact:true})});
+  const label=zone.label.replace(' (Default)','');
+  await expect(card).toContainText(label);await expect(card).not.toContainText(zone.value);
+  await card.getByRole('button',{name:'View Class',exact:true}).click();
+  const summary=page.locator('section').filter({has:page.getByRole('heading',{name:`US time zone ${index}`,exact:true})});
+  await expect(summary).toContainText(label);await expect(summary).not.toContainText(zone.value);
+  await page.getByRole('button',{name:'Back to Class Roster',exact:true}).click();
   await card.getByRole('button',{name:'Edit Class',exact:true}).click();dialog=page.getByRole('dialog');await expect(dialog.getByLabel('Class timezone',{exact:true})).toHaveValue(zone.value);
   const next=US_TIME_ZONES[(index+1)%US_TIME_ZONES.length];await dialog.getByLabel('Class timezone',{exact:true}).selectOption(next.value);
   await dialog.getByRole('button',{name:'Save Class',exact:true}).click();await expect(dialog).not.toBeVisible();
+  await expect(card).toContainText(next.label.replace(' (Default)',''));await expect(card).not.toContainText(next.value);
   await card.getByRole('button',{name:'Edit Class',exact:true}).click();await expect(page.getByRole('dialog').getByLabel('Class timezone',{exact:true})).toHaveValue(next.value);
   await page.getByRole('button',{name:'Close dialog',exact:true}).click();
  }
@@ -33,6 +40,42 @@ test('create/edit menus save all seven U.S. zones in order, default Eastern, and
  await dialog.getByRole('button',{name:'Save Class',exact:true}).click();await expect(dialog).not.toBeVisible();
  const state=await(await page.request.get('/api/teacher/state')).json() as TeacherState;
  expect(state.classes.find(item=>item.code==='TZOLD')?.timeZone).toBe('Europe/London');
+});
+
+test('student class previews and enrollments and Developer class cards use friendly labels while APIs retain IANA values',async({page,browser})=>{
+ test.setTimeout(120000);await teacherLogin(page);
+ for(const [index,zone] of US_TIME_ZONES.entries()){
+  const created=await page.request.post('/api/teacher/classes',{headers,data:{name:`Friendly zone ${index}`,code:`ZLB0${index}`,timeZone:zone.value,startTime:'00:00',endTime:'23:59'}});
+  expect(created.ok()).toBe(true);expect((await created.json()).classroom.timeZone).toBe(zone.value);
+ }
+ const studentContext=await browser.newContext(),adminContext=await browser.newContext();
+ try{
+  const signup=await studentContext.request.post('/api/auth/signup',{headers,data:{firstName:'Zone',lastName:`Labels${Date.now()}`,password:'DevelopmentLabels2026!'}});expect(signup.ok()).toBe(true);
+  expect((await studentContext.request.post('/api/student/tutorial',{headers,data:{}})).ok()).toBe(true);
+  const student=await studentContext.newPage();await student.goto('/');
+  await student.getByRole('button',{name:'+ Join a Class',exact:true}).click();
+  const dialog=student.getByRole('dialog',{name:'Join a Class',exact:true});
+  await dialog.getByLabel('Class enrollment code',{exact:true}).fill('ZLB00');
+  await dialog.getByRole('button',{name:'Find Class',exact:true}).click();
+  await expect(dialog.getByText('USA / Eastern',{exact:true})).toBeVisible();await expect(dialog).not.toContainText('America/New_York');
+  await dialog.getByRole('button',{name:'Confirm Join',exact:true}).click();await expect(dialog).not.toBeVisible();
+  for(let index=1;index<US_TIME_ZONES.length;index++)expect((await studentContext.request.post('/api/student/enroll',{headers,data:{classroomCode:`ZLB0${index}`}})).ok()).toBe(true);
+  await student.reload();
+  const state=await(await student.request.get('/api/student/state')).json() as StudentState;
+  const admin=await adminContext.newPage();await admin.goto('/admin/login');
+  await admin.getByLabel('Developer username',{exact:true}).fill('davidanzezhang');
+  await admin.getByLabel('Password',{exact:true}).fill(process.env.WATERCYCLE_E2E_ADMIN_PASSWORD!);
+  await admin.getByRole('button',{name:'Developer Sign In',exact:true}).click();await expect(admin).toHaveURL(/\/admin\/dashboard$/);
+  await admin.getByRole('navigation',{name:'Administrator navigation'}).getByRole('button',{name:'Classes',exact:true}).click();
+  for(const [index,zone] of US_TIME_ZONES.entries()){
+   const label=zone.label.replace(' (Default)','');
+   for(const portal of [student,admin]){
+    const card=portal.getByRole('article').filter({has:portal.getByRole('heading',{name:`Friendly zone ${index}`,exact:true})});
+    await expect(card).toContainText(label);await expect(card).not.toContainText(zone.value);
+   }
+   expect(state.enrollments.find(enrollment=>enrollment.classroom.code===`ZLB0${index}`)?.classroom.timeZone).toBe(zone.value);
+  }
+ }finally{await studentContext.close();await adminContext.close();}
 });
 
 test('class-local registrations, live break clocks, date filters and 24px Overview gaps work independently of browser timezone',async({browser})=>{
