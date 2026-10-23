@@ -3,10 +3,13 @@
   "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
   "containerEnv": {
     "LOCAL_DATABASE": "true",
-    "DEMO_MODE": "true"
+    "DEMO_MODE": "true",
+    "WATERCYCLE_ENVIRONMENT": "development"
   },
-  "postCreateCommand": "npm install && node scripts/setup-codespaces.mjs",
-  "forwardPorts": [3000],
+  "postCreateCommand": "npm install && npm run dev:setup",
+  "forwardPorts": [
+    3000
+  ],
   "portsAttributes": {
     "3000": {
       "label": "WaterCycle",

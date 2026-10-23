@@ -63,7 +63,7 @@ Keep owner/direct credentials in a private password manager or ignored environme
 - `MIGRATION_DATABASE_URL`: direct owner/migration connection for the target database, with TLS.
 - `WATERCYCLE_ENVIRONMENT`: the target environment.
 - `WATERCYCLE_DATABASE_ID`: that database's fixed UUID.
-- Clear `LOCAL_DATABASE`, `DEMO_MODE`, and `LOCAL_DATABASE_PATH`. Codespaces sets local demo flags by default, so unset them in the operator terminal before using managed maintenance commands.
+- Clear `LOCAL_DATABASE`, `DEMO_MODE`, and `LOCAL_DATABASE_PATH` in a trusted operator workstation or private maintenance job outside Codespaces. Codespaces deliberately refuse all managed database connections, including maintenance commands; keep production connection secrets out of Codespaces.
 
 `DATABASE_URL` can remain unset for maintenance when `MIGRATION_DATABASE_URL` is provided. Never print connection strings, commit private files, or paste owner credentials into a public command example.
 

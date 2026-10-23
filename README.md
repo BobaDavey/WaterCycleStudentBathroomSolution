@@ -6,16 +6,16 @@ WaterCycle helps teachers manage classroom restroom and water breaks. Students a
 
 Built with **Next.js, React, TypeScript, and PostgreSQL**, with the existing green and cream WaterCycle design.
 
-## Current demo accounts
+## Development-only demo accounts
 
-Use these accounts in the current testing environment. Select the appropriate sign-in tab and enter the credentials manually.
+Every fresh Codespace automatically creates these accounts in its own isolated development database. Select the appropriate sign-in tab and enter the credentials manually. Both are enabled; the student is Active and enrolled in the demo teacher’s **Demo Biology** class, code **DEMO1**. No registration or approval is needed for these two samples.
 
 | Portal | Username | Password |
 | --- | --- | --- |
 | Teacher | `teachertest` | `1234567890` |
 | Student | `teststudent` | `1234567890` |
 
-These are public testing credentials. For a newly created local database, see the [local sample accounts](#local-sample-accounts) below; the seed script has its own fixtures and preserves existing credentials.
+These public credentials are for local development only. They are never seeded into Vercel Production or Preview. Setup never resets passwords or account statuses in an existing database. No credential autofill buttons are shown in the app.
 
 ## Features at a glance
 
@@ -127,59 +127,72 @@ New tickets start **Need Attention**. Solving changes the status to **Solved**, 
 
 Problem reporting stores tickets in the app. Email sending, ticket replies, and direct messaging are not included; the developer contacts teachers externally using their supplied email.
 
-## Preview in GitHub Codespaces
+## Preview WaterCycle on Another Computer or GitHub Codespace
 
-Create a Codespace from this repository's **main** branch. The dev container uses Node.js 24, installs dependencies, and prepares local sample data. Start the app:
+1. Sign in to GitHub with your own authorized account and open this repository on **main**.
+2. Select **Code → Codespaces → Create codespace on main**. Wait for the container setup to finish.
+3. Setup automatically installs dependencies, writes an ignored local development configuration, initializes an isolated PostgreSQL-compatible PGlite database in **.local/data**, applies local migrations, and creates the demo accounts and class. No external database or shared secret is needed.
+4. In the terminal, run:
+
+   ```bash
+   npm run dev
+   ```
+
+5. Open **Ports → 3000 → Open in Browser**. Keep the port **Private**. Each friend should open their own Codespace and its own forwarded page.
+6. Choose **I’m a teacher**, then enter **teachertest / 1234567890**. The class roster contains **Test Student** in **Demo Biology**.
+7. Sign out, choose **I’m a student**, then enter **teststudent / 1234567890**. This sample is already **Active** and can request restroom or water breaks immediately. Complete the questions, leave, then click **I'm Back** to record return.
+
+Each checkout has its own ignored database. Your existing accounts, password changes, private Codespaces secrets, and production records are not part of a Git clone. The production Developer password is intentionally neither distributed nor copied: it authenticates against the protected production database, not a collaborator’s new local database.
+
+### If automatic setup did not finish, or you are using your own computer
+
+Use Node.js **22 or newer** (Codespaces uses Node.js 24). Stop any running WaterCycle server, then run:
 
 ```bash
-npm run dev
-```
-
-For an existing checkout, stop the running dev server before updating:
-
-```bash
-git pull --ff-only origin main
 npm install
+npm run dev:setup
+npm run dev:doctor
 npm run dev
 ```
 
-Open **Ports → 3000 → Open in Browser**. The forwarded port can remain private. If an older Codespace has outdated container settings, use **Codespaces: Rebuild Container**. A fresh local database uses the sample accounts described below.
+Open `http://localhost:3000` locally, or port 3000 in Codespaces. Setup loads the same development environment files as Next.js, refuses hosted/managed database settings, and never replaces an existing `.env.local`. An existing local configuration must specify `WATERCYCLE_ENVIRONMENT=development`, `LOCAL_DATABASE=true`, and `DEMO_MODE=true`; leave both database URL variables empty. Do not copy production secrets into a Codespace.
 
-## Local development
+For an older Codespace, stop the server, run `git pull --ff-only origin main`, then the four commands above. **Codespaces: Rebuild Container** also reruns setup. Seeding is repeatable: it adds missing sample accounts and preserves existing passwords, approval statuses, transfers, removals, and history. If someone has intentionally changed a sample account, use that account’s current password/status; choose a new `LOCAL_DATABASE_PATH` for a separate fresh demo instead of deleting the old database.
 
-Use Node.js **22 or newer**; the development container uses Node.js 24.
+### Optional development-only Developer Portal
 
-```bash
-npm install
-cp .env.example .env.local
-```
-
-For a local database, enable `LOCAL_DATABASE=true` and `DEMO_MODE=true` in ignored `.env.local`, leave `DATABASE_URL` empty, and prepare sample data:
+No privileged account is created automatically. An authorized developer can stop the server and run:
 
 ```bash
-LOCAL_DATABASE=true npm run db:seed
-npm run dev
+npm run dev:admin
 ```
 
-The seed command reads process environment variables rather than loading Next.js's `.env.local` automatically, so the command includes the local-database setting explicitly. Seeding refuses an external `DATABASE_URL`, adds missing sample data, and preserves existing credentials and records.
+Choose a **new development-only password** of at least 12 characters at the hidden terminal prompt. Restart with `npm run dev`, open **/admin/login**, and sign in as **watercycledev** using that chosen password. This account is labeled **Development Administrator**, exists only in that isolated local database, and can manage only its demo records. Repeating the command preserves its existing password. Do not reuse a production password.
 
-### Local sample accounts
+For unattended local tests only, `DEV_ADMIN_INITIAL_PASSWORD` can be supplied privately in the process environment. There is no default privileged password. Remove that initialization variable after use. The production administrator bootstrap remains a separate managed-database operator command; it is never called by local setup, seeding, install, build, or application startup.
 
-<details>
-<summary>Accounts created by the local seed script</summary>
+### Troubleshoot login or setup
 
-These fixtures are separate from the current testing accounts listed at the top of this README.
+Stop the server before running `npm run dev:doctor`. It checks the database without changing records and explains configuration, initialization, migration, password, status, and enrollment failures.
 
-| Local sample role | Username | Initial sample password |
-| --- | --- | --- |
-| Teacher | `morganreed`, `mariamiller` | `WaterCycle2026!` |
-| Student | `jamiechen`, `alexrivera`, `sampatel` | `Biology2026!` |
+| Symptom | What to do |
+| --- | --- |
+| Demo database/account not initialized | Run `npm run dev:setup`, then `npm run dev:doctor` |
+| Incorrect username/password | Select the correct portal and type the development credentials above manually. If a password was changed locally, setup preserves it |
+| Pending teacher approval | Newly registered accounts still require teacher approval. The fresh seeded `teststudent` is already Active |
+| Deactivated account | Ask the local class teacher to reactivate it; setup does not undo intentional deactivation |
+| Database unavailable or already open | Stop the other WaterCycle server/script. Preserve `.local/data`; do not delete it. Check the terminal and [local database safety](docs/local-database.md) |
+| Migrations incomplete | Preserve the directory, run `dev:doctor`, then `dev:setup` after reviewing its instructions. Incompatible/future migration histories are refused |
+| Missing/unsafe development configuration | Remove production URLs/secrets from Codespaces configuration. Use the local settings above; rerun setup |
+| Developer sign-in fails | Run the optional `dev:admin` command and use `watercycledev` with your chosen development password. Production credentials do not initialize a local account |
 
-The seed creates two teachers, four classes, 18 approved sample students, biology banks, and completed sample trips. Morgan's classes use `01001` and `01002`; Maria's use `02001` and `02002`. Previously changed passwords remain unchanged.
+Development server logs point out missing demo initialization and student approval/deactivation. Production sign-in responses remain generic and never disclose whether a username exists. `/api/health` remains a minimal availability check with no account or credential details.
 
-</details>
+### Additional local sample accounts
 
-Local PGlite data lives in ignored **`.local/data`**. Stop the app before running a seed or administrator bootstrap command against that directory. Separate running instances need separate `LOCAL_DATABASE_PATH` values. See [local database safety](docs/local-database.md).
+Legacy testing fixtures remain available: teachers `morganreed` / `mariamiller` use initial password `WaterCycle2026!`; students such as `jamiechen`, `alexrivera`, and `sampatel` use `Biology2026!`. These fixtures retain their four sample classes (`01001`, `01002`, `02001`, `02002`) alongside the primary demo class `DEMO1`. Existing changed passwords stay unchanged.
+
+Local PGlite data is independent of managed PostgreSQL. Codespaces refuse managed database connections altogether. Other local previews may use only a managed database explicitly bound to **development**, with the existing identity and role checks. Hosted Preview and Production still require separate protected managed PostgreSQL databases. Local development administrator setup changes the administrator identity policy only inside the opted-in PGlite database; production schema, administrator identity, passwords, backup gates, and runtime restrictions remain unchanged.
 
 ## Deploy to Vercel with persistent data
 
@@ -205,11 +218,14 @@ npm test
 npm run test:e2e
 npm run build
 npm run test:postgres
+npm run test:fresh
 ```
 
 Automated coverage includes account approval and migration preservation, current-status enforcement, role/class ownership, teacher and developer authentication, password changes, class codes, roster actions, biology learning and retry protection, tutorials, FIFO/reservation concurrency, timers and warnings, Rule Offenders, return corrections and paused-capacity recovery, report validation and failed-form recovery, and developer ticket search, pagination, and status history.
 
 The PostgreSQL persistence suite creates its own disposable Docker server, verifies repeated application/production-server restarts, and exercises an actual backup/restore. It never uses your `DATABASE_URL`. Docker and OpenSSL are required; run the production build first.
+
+`npm run test:fresh` checks committed source in a separate temporary Git clone with its own dependency installation, environment, database, and HTTP server. It verifies exact demo logins, enrollment, breaks, opt-in local administrator access, repeated setup, preserved changed credentials/status/history, and rejected production settings. Commit your changes before running it; it does not test uncommitted edits.
 
 Browser tests recreate only **`.local/e2e-data`**. They use a generated test administrator secret and do not reset the application database. Chromium at `/usr/bin/chromium` is used when available; otherwise run `npx playwright install chromium` or set `CHROMIUM_PATH`.
 

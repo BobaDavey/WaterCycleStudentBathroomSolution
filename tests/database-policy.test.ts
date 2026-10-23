@@ -31,7 +31,7 @@ test('demo setup cannot run in any hosted environment, production build, or agai
 });
 test('runtime uses only DATABASE_URL and maintenance may use a separate credential for the same environment identity',()=>{
  const env={...base,MIGRATION_DATABASE_URL:'postgresql://owner:example@database.example/classroom?sslmode=require'};
- assert.equal(managedConfiguration({...env,VERCEL:'0'}).url,base.DATABASE_URL);assert.equal(managedConfiguration(env,'operator').url,env.MIGRATION_DATABASE_URL);
+ assert.equal(managedConfiguration({...env,VERCEL:'0',NODE_ENV:'production'}).url,base.DATABASE_URL);assert.equal(managedConfiguration(env,'operator').url,env.MIGRATION_DATABASE_URL);
  assert.throws(()=>managedConfiguration(env),/migration credentials/);
  assert.equal(managedConfiguration(env,'operator').binding.databaseId,base.WATERCYCLE_DATABASE_ID);
 });

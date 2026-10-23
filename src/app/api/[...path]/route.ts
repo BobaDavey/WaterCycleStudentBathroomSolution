@@ -7,6 +7,7 @@ import { reportSchema, reportFiltersSchema, reportStatusSchema } from '@/lib/pro
 import { ruleOffendersSchema } from '@/lib/rule-offenders';
 import type { User } from '@/lib/contracts';
 import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
+import { developmentDiagnostic } from '@/lib/development-diagnostics';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
@@ -101,6 +102,8 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='admin/profile'&&method==='PATCH'){await app.updateAdminProfile(user,adminProfileSchema.parse(await json()));return ok();}
   throw new AppError(404,'That page or action was not found.');
  }catch(error){
+  const diagnostic=developmentDiagnostic(error,process.env);
+  if(diagnostic){console.error(diagnostic);return NextResponse.json({error:'Development database setup is unavailable. Check the server terminal and the README troubleshooting steps.'},{status:503,headers:{'Cache-Control':'no-store'}});}
   if(error instanceof AppError)return NextResponse.json({error:error.message},{status:error.status,headers:{'Cache-Control':'no-store'}});
   if(error instanceof z.ZodError)return NextResponse.json({error:error.issues[0]?.message||'Please check your entries.'},{status:400});
   const pg=error as {code?:string;constraint?:string};

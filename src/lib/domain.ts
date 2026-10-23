@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Database, SQL } from './db';
 import { AppError, hashPassword, userFrom, usernameFor, verifyPassword } from './auth';
-import { ADMIN_USERNAME } from './bootstrap-admin';
+import { allowedAdministrator, reservedAdministratorUsername } from './bootstrap-admin';
 import type { BreakPurpose, AdminState, AdminStudent, ClassDetail, Classroom, Question, Quiz, QuizResult, RosterStudent, StudentDetail, StudentState, TeacherAccount, TeacherState, User, Visit } from './contracts';
 import { defaultQuestions } from './default-questions';
 import { submitProblemReport, listProblemReports, problemReportDetail, updateProblemReport, type ReportInput, type ReportFilters } from './problem-reports';
@@ -10,7 +10,7 @@ import { loadRuleOffenders, type RuleOffendersFilters } from './rule-offenders';
 
 const name = z.string().trim().min(1, 'Please enter a name.').max(50);
 const password = z.string().min(8, 'Passwords must have at least 8 characters.').max(128);
-const username = z.string().trim().min(2).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9._@+\-]*$/, 'Use letters, numbers, or an email address for the username.').transform(v => v.toLowerCase()).refine(v => v !== ADMIN_USERNAME, 'That username is reserved for the administrator.');
+const username = z.string().trim().min(2).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9._@+\-]*$/, 'Use letters, numbers, or an email address for the username.').transform(v => v.toLowerCase()).refine(v => !reservedAdministratorUsername(v), 'That username is reserved for the administrator.');
 const email = z.union([z.email().max(254), z.literal(''), z.null()]).transform(v => v || null).optional();
 const code = z.string().regex(/^[A-Za-z0-9]{5}$/, 'Enrollment codes must contain exactly five English letters or numbers.').transform(value => value.toUpperCase());
 const className = z.string().trim().min(1, 'Please enter a class name.').max(100);
@@ -46,7 +46,7 @@ export function requirePasswordChange(user: User) { if (user.mustChangePassword)
 async function currentActor(tx: SQL, user: User, role: User['role'], changing = false, lock = false) {
  assertRole(user,role);
  const { rows: [row] } = await tx.query(`SELECT * FROM users WHERE id=$1 AND role=$2 AND (enabled=TRUE OR role='student')${lock?' FOR UPDATE':''}`, [user.id,role]);
- if (!row || (role === 'admin' && row.username !== ADMIN_USERNAME)) throw new AppError(403, 'Your account is unavailable. Please sign in again.');
+ if (!row || (role === 'admin' && !allowedAdministrator(tx,row.username))) throw new AppError(403, 'Your account is unavailable. Please sign in again.');
  if (changing && row.must_change_password) throw new AppError(403, 'Please change your temporary password before continuing.');
  return row;
 }
@@ -113,7 +113,9 @@ export class WaterCycle {
  constructor(readonly db: Database) {}
  async login(input: z.infer<typeof loginSchema>, connection: SQL = this.db): Promise<User> {
   const { rows: [row] } = await connection.query('SELECT * FROM users WHERE username=$1 AND role=$2 FOR UPDATE', [input.username.toLowerCase(), input.role]);
-  if (!await verifyPassword(input.password, row?.password_hash as string | null) || (!row?.enabled && row?.role!=='student') || (input.role === 'admin' && row.username !== ADMIN_USERNAME)) throw new AppError(401, 'The username or password is incorrect.');
+  if (!row && this.db.localDevelopment && process.env.NODE_ENV!=='production' && ['teachertest','teststudent'].includes(input.username.toLowerCase())) console.warn('Local demo account not initialized. Stop the server and run npm run dev:setup. Existing account passwords are never reset.');
+  if (!await verifyPassword(input.password, row?.password_hash as string | null) || (!row?.enabled && row?.role!=='student') || (input.role === 'admin' && !allowedAdministrator(connection,row.username))) throw new AppError(401, 'The username or password is incorrect.');
+  if (this.db.localDevelopment && process.env.NODE_ENV !== 'production' && row.role==='student' && row.account_status!=='active') console.info(`Local student sign-in: account status is ${row.account_status}. Teacher approval or reactivation is required before requesting a break.`);
   return userFrom(row);
  }
  async setup(_input?: unknown): Promise<User> { throw new AppError(410,'Teacher accounts are created by the administrator. Public teacher registration is unavailable.'); }
@@ -121,7 +123,7 @@ export class WaterCycle {
  async signup(input: z.infer<typeof signupSchema>): Promise<User> {
   const classroomCode=normalizedCode(input.classroomCode);
   const login = input.username || usernameFor(input.firstName,input.lastName);
-  if (login.length < 2 || login === ADMIN_USERNAME) throw new AppError(400,'Choose a valid student username.');
+  if (login.length < 2 || reservedAdministratorUsername(login)) throw new AppError(400,'Choose a valid student username.');
   const hash = await hashPassword(input.password);
   return this.db.transaction(async tx => {
    const { rows: [classroom] } = await tx.query(`SELECT c.* FROM classrooms c JOIN users t ON t.id=c.teacher_id WHERE c.code=$1 AND c.archived=FALSE AND t.enabled=TRUE FOR UPDATE OF c`,[classroomCode]);
@@ -362,7 +364,7 @@ export class WaterCycle {
  async addRoster(user:User,input:z.infer<typeof rosterSchema>,classroomId?:string):Promise<RosterStudent> {
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    const classroom=await this.selectedClass(user,classroomId,tx,true);await currentActor(tx,user,'teacher',true);if(classroom.archived)throw new AppError(409,'Archived classes cannot accept new students.');
-   const login=usernameFor(input.firstName,input.lastName);if(login.length<2||login===ADMIN_USERNAME)throw new AppError(400,'Choose a valid student name and username.');
+   const login=usernameFor(input.firstName,input.lastName);if(login.length<2||reservedAdministratorUsername(login))throw new AppError(400,'Choose a valid student name and username.');
    const id=randomUUID();const {rows:[row]}=await tx.query("INSERT INTO users(id,role,first_name,last_name,username,classroom_id) VALUES($1,'student',$2,$3,$4,$5) RETURNING *",[id,input.firstName,input.lastName,login,classroom.id]);await attachEnrollment(tx,id,String(classroom.id));return rosterFrom(row);
   });
  }
@@ -482,5 +484,5 @@ export class WaterCycle {
    if(input.enabled===false||hash)await tx.query('DELETE FROM sessions WHERE user_id=$1',[id]);
   });
  }
- async updateAdminProfile(user:User,input:z.infer<typeof adminProfileSchema>) {const current=await currentActor(this.db,user,'admin',true);await this.db.query("UPDATE users SET first_name=$1,last_name=$2,email=$3 WHERE id=$4 AND role='admin' AND username=$5",[input.firstName,input.lastName,input.email!==undefined?input.email:current.email,user.id,ADMIN_USERNAME]);}
+ async updateAdminProfile(user:User,input:z.infer<typeof adminProfileSchema>) {const current=await currentActor(this.db,user,'admin',true);await this.db.query("UPDATE users SET first_name=$1,last_name=$2,email=$3 WHERE id=$4 AND role='admin' AND username=$5",[input.firstName,input.lastName,input.email!==undefined?input.email:current.email,user.id,current.username]);}
 }

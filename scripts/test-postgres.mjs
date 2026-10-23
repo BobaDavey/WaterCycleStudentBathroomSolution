@@ -20,7 +20,7 @@ try{
  if(!ready)throw new Error('Isolated PostgreSQL did not become ready.');
  const port=command('docker',['port',name,'5432/tcp']).split(':').at(-1);
  const url=new URL(`postgresql://fixture_owner:${password}@127.0.0.1:${port}/postgres`);url.searchParams.set('sslmode','verify-full');url.searchParams.set('sslrootcert',path.join(root,'server.crt'));
- const env={...process.env,DATABASE_URL:'',MIGRATION_DATABASE_URL:'',ADMIN_INITIAL_PASSWORD:'',LOCAL_DATABASE:'',LOCAL_DATABASE_PATH:'',DEMO_MODE:'',VERCEL:'0',VERCEL_ENV:'development',WATERCYCLE_ENVIRONMENT:'development',WATERCYCLE_DATABASE_ID:'',NODE_ENV:'test',WATERCYCLE_POSTGRES_TEST_URL:url.toString(),WATERCYCLE_POSTGRES_CONTAINER:name,WATERCYCLE_POSTGRES_FIXTURE_ROOT:root};
+ const env={...process.env,CODESPACES:'false',DEV_ADMIN_INITIAL_PASSWORD:'',DATABASE_URL:'',MIGRATION_DATABASE_URL:'',ADMIN_INITIAL_PASSWORD:'',LOCAL_DATABASE:'',LOCAL_DATABASE_PATH:'',DEMO_MODE:'',VERCEL:'0',VERCEL_ENV:'development',WATERCYCLE_ENVIRONMENT:'development',WATERCYCLE_DATABASE_ID:'',NODE_ENV:'test',WATERCYCLE_POSTGRES_TEST_URL:url.toString(),WATERCYCLE_POSTGRES_CONTAINER:name,WATERCYCLE_POSTGRES_FIXTURE_ROOT:root};
  const child=spawn(process.execPath,['--import','tsx','--test','tests/postgres/persistence.test.ts'],{env,stdio:'inherit'});
  process.exitCode=await new Promise(resolve=>{child.once('error',()=>resolve(1));child.once('exit',code=>resolve(code??1));});
 } catch(error){console.error(error instanceof Error?error.message:'Isolated PostgreSQL tests failed.');process.exitCode=1;}

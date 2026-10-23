@@ -4,15 +4,15 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { lockLocalDatabase } from './local-database-lock';
 import { migrateDatabase } from './migrations';
-import { bootstrapAdministrator } from './bootstrap-admin';
 import { DatabaseConfigurationError, assertLocalDatabaseAllowed, hosted, managedConfiguration, validatePostgresUrl, type DatabaseBinding } from './database-policy';
 import { applyManagedMigrations, initializationLock, verifyRuntimeDatabase } from './managed-database';
 
-export interface SQL { query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>; }
+export interface SQL { readonly localDevelopment?: boolean; query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>; }
 export interface Database extends SQL { transaction<T>(fn: (tx: SQL) => Promise<T>): Promise<T>; close(): Promise<void>; }
 
 export async function createDatabase(options: { url?: string; directory?: string; bootstrapAdmin?: boolean; binding?: DatabaseBinding; operator?: boolean; migration?: {expectedVersion:number;backupReference?:string} } = {}): Promise<Database> {
  if (options.url) {
+  if(process.env.CODESPACES==='true')throw new DatabaseConfigurationError('Codespaces use isolated local databases. Remove managed database URLs and run npm run dev:setup.');
   if(!options.binding)throw new Error('Managed database connections require an explicit environment and database identity.');
   validatePostgresUrl(options.url,hosted(process.env));
   const pool = new Pool({ connectionString: options.url, options:'-c search_path=public', max: 4, idleTimeoutMillis: 20000, connectionTimeoutMillis: 15000 });
@@ -59,12 +59,11 @@ export async function createDatabase(options: { url?: string; directory?: string
  }
  try { await db.transaction(async tx => { await migrateDatabase({ async query<T>(sql:string,params:unknown[] = []) { const result=await tx.query<T>(sql,params); return {rows:result.rows}; } }, async sql=>{ await tx.exec(sql); }); }); } catch(error) { await close().catch(()=>{}); throw error; }
  const database: Database = {
+  localDevelopment: true,
   async query<T>(sql: string, params: unknown[] = []) { const result = await db.query<T>(sql, params); return { rows: result.rows }; },
-  async transaction<T>(fn: (tx: SQL) => Promise<T>) { return db.transaction(async tx => fn({ async query<T>(sql: string, params: unknown[] = []) { const result = await tx.query<T>(sql, params); return { rows: result.rows }; } })); },
+  async transaction<T>(fn: (tx: SQL) => Promise<T>) { return db.transaction(async tx => fn({ localDevelopment: true, async query<T>(sql: string, params: unknown[] = []) { const result = await tx.query<T>(sql, params); return { rows: result.rows }; } })); },
   async close() { await close(); }
  };
- try { if (options.bootstrapAdmin !== false && process.env.ADMIN_INITIAL_PASSWORD) await bootstrapAdministrator(database,process.env.ADMIN_INITIAL_PASSWORD); }
- catch(error) { await close().catch(()=>{}); throw error; }
  return database;
 }
 

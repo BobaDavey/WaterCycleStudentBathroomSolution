@@ -25,6 +25,8 @@ export function validatePostgresUrl(value:string, requireTls=false):string {
  return value;
 }
 export function managedConfiguration(env:Environment, purpose:'runtime'|'operator'='runtime'):{url:string;binding:DatabaseBinding} {
+ if(env.CODESPACES==='true')fail('Codespaces use isolated local demo data. Remove DATABASE_URL and MIGRATION_DATABASE_URL from Codespaces secrets and run npm run dev:setup. Managed connections are refused.');
+ if(purpose==='runtime' && env.VERCEL!=='1' && env.NODE_ENV!=='production' && env.WATERCYCLE_ENVIRONMENT!=='development')fail('Local previews can connect only to a database bound to development. Use npm run dev:setup for an isolated demo.');
  if(Object.keys(env).some(key=>key.startsWith('NEXT_PUBLIC_')&&/(DATABASE_URL|ADMIN_INITIAL_PASSWORD)/.test(key)&&env[key]))fail('Database URLs and initialization secrets must never use NEXT_PUBLIC_ environment variables.');
  if(purpose==='runtime'&&env.VERCEL==='1'&&env.MIGRATION_DATABASE_URL)fail('Keep migration credentials outside the Vercel runtime environment.');
  const environment=env.WATERCYCLE_ENVIRONMENT;

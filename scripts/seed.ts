@@ -2,23 +2,27 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase, type SQL } from '../src/lib/db';
 import { hashPassword } from '../src/lib/auth';
 import { assertDemoSeedAllowed } from '../src/lib/database-policy';
+import { loadDevelopmentEnvironment } from './development-environment.mjs';
 import { defaultQuestions } from '../src/lib/default-questions';
 
 type Row = Record<string, unknown>;
 async function seed() {
+ loadDevelopmentEnvironment();
  assertDemoSeedAllowed(process.env);
  const db=await createDatabase({directory:process.env.LOCAL_DATABASE_PATH});
  try {
   const teacherHash=await hashPassword('WaterCycle2026!');
   const studentHash=await hashPassword('Biology2026!');
+  const demoHash=await hashPassword('1234567890');
   await db.transaction(async tx=>{
-   async function teacher(first:string,last:string,username:string) {
+   if((await tx.query('SELECT environment FROM watercycle_database_identity')).rows.length)throw new Error('Demo seeding refuses a database bound to a managed environment. Existing accounts were preserved.');
+   async function teacher(first:string,last:string,username:string,hash=teacherHash) {
     const {rows:[existing]}=await tx.query<Row>('SELECT * FROM users WHERE username=$1',[username]);
     if (existing) {
      if (existing.role !== 'teacher') throw new Error('A demo teacher username is already assigned to another account. Existing data was preserved.');
      return existing;
     }
-    const {rows:[created]}=await tx.query<Row>(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id) VALUES($1,'teacher',$2,$3,$4,$5,NULL) RETURNING *`,[randomUUID(),first,last,username,teacherHash]);
+    const {rows:[created]}=await tx.query<Row>(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,enabled,account_status) VALUES($1,'teacher',$2,$3,$4,$5,NULL,TRUE,'active') RETURNING *`,[randomUUID(),first,last,username,hash]);
     return created;
    }
    async function classroom(owner:Row,name:string,period:string,code:string,primary=false) {
@@ -36,7 +40,7 @@ async function seed() {
     if (Number(count.n)===0) for (const q of defaultQuestions) await tx.query('INSERT INTO questions(id,classroom_id,prompt,options,correct_index,topic,explanation,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[randomUUID(),row.id,q.prompt,JSON.stringify(q.options),q.correctIndex,q.topic,q.explanation,q.active]);
     return row;
    }
-   async function students(classroomId:unknown,names:string[][]) {
+   async function students(classroomId:unknown,names:string[][],hash=studentHash) {
     for (const [first,last] of names) {
      const username=`${first}${last}`.toLowerCase();
      const {rows:[existing]}=await tx.query<Row>('SELECT * FROM users WHERE username=$1',[username]);
@@ -46,12 +50,15 @@ async function seed() {
       continue;
      }
      const id=randomUUID();
-     await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,account_status) VALUES($1,'student',$2,$3,$4,$5,$6,'active')`,[id,first,last,username,studentHash,classroomId]);
+     await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,account_status) VALUES($1,'student',$2,$3,$4,$5,$6,'active')`,[id,first,last,username,hash,classroomId]);
      await enroll(tx,id,classroomId);
      // Only new sample trips receive a purpose; historical trips remain intact.
      if (first !== 'Jamie') await tx.query(`INSERT INTO visits(id,classroom_id,student_id,status,purpose,requested_at,ready_at,left_at,returned_at) VALUES($1,$2,$3,'returned',$4,CURRENT_TIMESTAMP-INTERVAL '42 minutes',CURRENT_TIMESTAMP-INTERVAL '42 minutes',CURRENT_TIMESTAMP-INTERVAL '41 minutes',CURRENT_TIMESTAMP-INTERVAL '37 minutes')`,[randomUUID(),classroomId,id,first.length%2===0?'water':'restroom']);
     }
    }
+   const demoTeacher=await teacher('Demo','Teacher','teachertest',demoHash);
+   const demoClass=await classroom(demoTeacher,'Demo Biology','Demo','DEMO1',true);
+   await students(demoClass.id,[['Test','Student']],demoHash);
    const morgan=await teacher('Morgan','Reed','morganreed');
    const maria=await teacher('Maria','Miller','mariamiller');
    const first=await classroom(morgan,'AP Biology · Period 2','2','01001',true);
@@ -63,9 +70,9 @@ async function seed() {
    await students(third.id,[['Noah','Kim'],['Maya','Robinson']]);
    await students(fourth.id,[['Elena','Torres'],['Owen','Clark']]);
   });
-  console.log('Local demo prepared: two sample teachers, four class periods, separate student rosters, biology banks, and completed sample trips. Existing records and credentials were preserved.');
+  console.log('Local demo prepared: teachertest and active teststudent in class DEMO1, plus legacy sample classes and biology banks. Existing records, account statuses, and credentials were preserved.');
   const {rows}=await db.query("SELECT id FROM users WHERE role='admin'");
-  if (!rows.length) console.log('Admin sign-in is available at /admin/login. Provision its password privately with ADMIN_INITIAL_PASSWORD; no default administrator password was created.');
+  if (!rows.length) console.log('Optional local Developer Portal testing: stop the server and run npm run dev:admin. No administrator or default privileged password was created.');
  } finally {await db.close();}
 }
 async function enroll(tx:SQL,studentId:unknown,classroomId:unknown) {

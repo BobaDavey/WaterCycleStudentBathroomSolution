@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import type { Database } from './db';
+import type { Database, SQL } from './db';
 import { hashPassword } from './auth';
 
 export const ADMIN_USERNAME = 'davidanzezhang';
+export const DEVELOPMENT_ADMIN_USERNAME = 'watercycledev';
+export function allowedAdministrator(db: SQL, username: unknown) {
+ return username === ADMIN_USERNAME || (db.localDevelopment === true && username === DEVELOPMENT_ADMIN_USERNAME);
+}
+export function reservedAdministratorUsername(username: string) { return username === ADMIN_USERNAME || username === DEVELOPMENT_ADMIN_USERNAME; }
 export type AdminBootstrapStatus = 'created' | 'exists' | 'missing-secret';
 
 /** No public endpoint calls this helper. Existing passwords are never reset. */
