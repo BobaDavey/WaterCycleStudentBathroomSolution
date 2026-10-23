@@ -4,7 +4,7 @@ export interface User { id: string; role: Role; firstName: string; lastName: str
 export interface Classroom { id: string; teacherId: string; teacherName?: string; name: string; period: string | null; code: string | null; legacyCode?: string | null; timeZone: string; capacity: number; archived: boolean; studentCount: number; }
 export type VisitStatus = "waiting" | "ready" | "out" | "returned" | "cancelled";
 export type BreakPurpose = "restroom" | "water";
-export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; reservationPaused: boolean; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; corrections: BreakCorrection[]; position?: number; }
+export interface Visit { id: string; studentId: string; studentName: string; classroomId?: string; classroomName?: string; timeZone?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; reservationPaused: boolean; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; corrections: BreakCorrection[]; position?: number; }
 export interface Question { id: string; prompt: string; options: string[]; correctIndex: number; topic: string; explanation: string; active: boolean; }
 export type QuizQuestion = Omit<Question, "correctIndex" | "explanation" | "active">;
 export interface Quiz { id: string; purpose: BreakPurpose; correctCount: number; question: QuizQuestion; questionToken: string; expiresAt: string; notice?: string; }

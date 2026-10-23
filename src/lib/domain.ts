@@ -4,6 +4,7 @@ import type { Database, SQL } from './db';
 import { AppError, hashPassword, userFrom, usernameFor, verifyPassword } from './auth';
 import { allowedAdministrator, reservedAdministratorUsername } from './bootstrap-admin';
 import type { BreakPurpose, AdminState, AdminStudent, ClassDetail, Classroom, Question, Quiz, QuizResult, RosterStudent, StudentDetail, StudentState, TeacherAccount, TeacherState, User, Visit } from './contracts';
+import { DEFAULT_TIME_ZONE, effectiveTimeZone } from './time-zones';
 import { defaultQuestions } from './default-questions';
 import { submitProblemReport, listProblemReports, problemReportDetail, updateProblemReport, type ReportInput, type ReportFilters } from './problem-reports';
 import { loadRuleOffenders, type RuleOffendersFilters } from './rule-offenders';
@@ -36,9 +37,9 @@ export const adminProfileSchema = z.object({ firstName: name, lastName: name, em
 type Row = Record<string, unknown>;
 function iso(value: unknown): string | null { return value ? new Date(value as string | Date).toISOString() : null; }
 function nullable(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
-export function classroomFrom(row: Row): Classroom { return { id: String(row.id), teacherId: String(row.teacher_id), teacherName: `${row.teacher_first_name ?? ''} ${row.teacher_last_name ?? ''}`.trim() || undefined, name: String(row.name), period: nullable(row.period), code: nullable(row.code), timeZone: String(row.time_zone ?? 'America/New_York'), legacyCode: nullable(row.legacy_code), capacity: Number(row.capacity), archived: Boolean(row.archived), studentCount: Number(row.student_count || 0) }; }
+export function classroomFrom(row: Row): Classroom { return { id: String(row.id), teacherId: String(row.teacher_id), teacherName: `${row.teacher_first_name ?? ''} ${row.teacher_last_name ?? ''}`.trim() || undefined, name: String(row.name), period: nullable(row.period), code: nullable(row.code), timeZone: effectiveTimeZone(row.time_zone as string | null), legacyCode: nullable(row.legacy_code), capacity: Number(row.capacity), archived: Boolean(row.archived), studentCount: Number(row.student_count || 0) }; }
 function questionFrom(row: Row): Question { return { id: String(row.id), prompt: String(row.prompt), options: row.options as string[], correctIndex: Number(row.correct_index), topic: String(row.topic), explanation: String(row.explanation), active: Boolean(row.active) }; }
-function visitFrom(row: Row): Visit { return { id: String(row.id), studentId: String(row.student_id), studentName: `${row.first_name} ${row.last_name}`, classroomId: String(row.classroom_id), classroomName: String(row.classroom_name ?? ''), status: row.status as Visit['status'], purpose: (row.purpose ?? null) as BreakPurpose | null, requestedAt: iso(row.requested_at)!, readyAt: iso(row.ready_at), readyExpiresAt: iso(row.ready_expires_at), reservationPaused: Boolean(row.capacity_paused), leftAt: iso(row.left_at), returnedAt: iso(row.returned_at), warningAcknowledgedAt: iso(row.warning_acknowledged_at), corrections: (row.corrections ?? []) as Visit['corrections'] }; }
+function visitFrom(row: Row): Visit { return { id: String(row.id), studentId: String(row.student_id), studentName: `${row.first_name} ${row.last_name}`, classroomId: String(row.classroom_id), classroomName: String(row.classroom_name ?? ''), timeZone: effectiveTimeZone(row.classroom_time_zone as string | null), status: row.status as Visit['status'], purpose: (row.purpose ?? null) as BreakPurpose | null, requestedAt: iso(row.requested_at)!, readyAt: iso(row.ready_at), readyExpiresAt: iso(row.ready_expires_at), reservationPaused: Boolean(row.capacity_paused), leftAt: iso(row.left_at), returnedAt: iso(row.returned_at), warningAcknowledgedAt: iso(row.warning_acknowledged_at), corrections: (row.corrections ?? []) as Visit['corrections'] }; }
 function rosterFrom(row: Row): RosterStudent { return { id: String(row.id), firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), enabled: Boolean(row.enabled), accountStatus: row.account_status as RosterStudent['accountStatus'], registeredAt: iso(row.registered_at ?? row.created_at)!, approvedAt: iso(row.approved_at), registered: Boolean(row.password_hash), mustChangePassword: Boolean(row.must_change_password), visitsToday: Number(row.visits_today || 0), classroomId: nullable(row.current_classroom_id ?? row.classroom_id) }; }
 function teacherFrom(row: Row): TeacherAccount { return { id: String(row.id), firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), email: nullable(row.email), enabled: Boolean(row.enabled), mustChangePassword: Boolean(row.must_change_password), classCount: Number(row.class_count || 0), studentCount: Number(row.student_count || 0), createdAt: iso(row.created_at)! }; }
 function assertRole(user: User, role: User['role']) { if (user.role !== role) throw new AppError(403, role === 'admin' ? 'Administrator access required.' : role === 'teacher' ? 'Teacher access required.' : 'This action is for students.'); }
@@ -102,7 +103,7 @@ async function attachEnrollment(tx: SQL, studentId: string, classroomId: string)
  await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2',[classroomId,studentId]);
 }
 const classSelect = `SELECT c.*,t.first_name AS teacher_first_name,t.last_name AS teacher_last_name,t.enabled AS teacher_enabled,(SELECT COUNT(*) FROM enrollments e WHERE e.classroom_id=c.id AND e.active=TRUE) AS student_count FROM classrooms c JOIN users t ON t.id=c.teacher_id`;
-const visitSelect = `SELECT v.*,u.first_name,u.last_name,c.name AS classroom_name,
+const visitSelect = `SELECT v.*,u.first_name,u.last_name,c.name AS classroom_name,c.time_zone AS classroom_time_zone,
  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',bc.id,'teacherName',a.first_name||' '||a.last_name,'correctedAt',bc.corrected_at,'incorrectReturnedAt',bc.incorrect_returned_at,'reason',bc.reason) ORDER BY bc.corrected_at,bc.id) FROM break_corrections bc JOIN users a ON a.id=bc.teacher_id WHERE bc.visit_id=v.id),'[]'::jsonb) AS corrections
  FROM visits v JOIN users u ON u.id=v.student_id JOIN classrooms c ON c.id=v.classroom_id`;
 const rosterSelect = `SELECT u.*,e.classroom_id AS current_classroom_id,(SELECT COUNT(*) FROM visits v WHERE v.student_id=u.id AND v.classroom_id=e.classroom_id AND v.left_at>=DATE_TRUNC('day',CURRENT_TIMESTAMP)) AS visits_today FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE`;
@@ -332,7 +333,7 @@ export class WaterCycle {
   return{user,pendingStudents,classes:classes.map(classroomFrom),classroom:classroomFrom(classroom),students:students.map(rosterFrom),questions:questions.map(questionFrom),visits:visitModels,stats:{out:Number(stats.out),ready:Number(stats.ready),waiting:Number(stats.waiting),tripsToday:Number(stats.trips_today),averageMinutes:Number(stats.average_minutes||0)}};
  }
  async createClass(user: User,input:z.infer<typeof classCreateSchema>):Promise<Classroom> {
-  input={...input,code:normalizedCode(input.code),timeZone:timeZone.parse(input.timeZone ?? 'America/New_York')};
+  input={...input,code:normalizedCode(input.code),timeZone:timeZone.parse(input.timeZone ?? DEFAULT_TIME_ZONE)};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    await currentActor(tx,user,'teacher',true);const id=randomUUID();
    const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code,time_zone) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[id,user.id,input.name,input.period || null,input.code,input.timeZone]);
@@ -346,7 +347,7 @@ export class WaterCycle {
    const current=await this.selectedClass(user,id,tx,true);await currentActor(tx,user,'teacher',true);
    const nextCode=input.code??nullable(current.code);const archived=input.archived??Boolean(current.archived);
    if(!archived&&!nextCode)throw new AppError(400,'Choose a five-character enrollment code before activating this class.');
-   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??current.time_zone]);
+   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??effectiveTimeZone(current.time_zone as string | null)]);
    if(archived&&!current.archived){await tx.query("UPDATE visits SET status='cancelled' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[id]);await tx.query('UPDATE quizzes SET used=TRUE WHERE classroom_id=$1 AND used=FALSE',[id]);}
    return classroomFrom({...row,student_count:current.student_count});
   });

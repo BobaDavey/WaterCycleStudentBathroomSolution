@@ -1,3 +1,5 @@
+import { formatClassTimestamp } from './time-zones';
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...options, cache: "no-store",
@@ -13,8 +15,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export function post<T>(path: string, body?: unknown) {
   return api<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) });
 }
-export function time(value: string | null) {
-  return value ? new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—";
+export function time(value: string | null, zone?: string | null) {
+  return formatClassTimestamp(value,zone,{hour:'numeric',minute:'2-digit'});
 }
 export function duration(start: string | null, end?: string | null) {
   if (!start) return "—";

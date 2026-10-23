@@ -1,3 +1,4 @@
+import { effectiveTimeZone } from './time-zones';
 import { z } from 'zod';
 import type { SQL } from './db';
 import { AppError } from './auth';
@@ -52,7 +53,7 @@ export async function loadRuleOffenders(db: SQL, teacherId: string | null, filte
   const violations: RuleViolation[] = visible.map(row => ({
     id:String(row.id), studentId:String(row.student_id), studentName:String(row.student_name),
     classroomId:String(row.classroom_id),classroomName:String(row.classroom_name),period:row.period == null ? null : String(row.period),
-    timeZone:String(row.time_zone),violatedAt:iso(row.violated_at),leftAt:iso(row.left_at),
+    timeZone:effectiveTimeZone(row.time_zone as string | null),violatedAt:iso(row.violated_at),leftAt:iso(row.left_at),
     returnedAt:row.returned_at ? iso(row.returned_at) : null,durationSeconds:Number(row.duration_seconds),
     ongoing:Boolean(row.ongoing),totalViolations:Number(row.total_violations),
   }));

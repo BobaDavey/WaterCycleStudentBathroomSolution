@@ -35,7 +35,7 @@
 .statNumber { display: flex; align-items: baseline; gap: 8px; margin: 17px 0 9px; }
 .statNumber>span { font-size: 13px; color: #7d847a; }
 .statBadge { margin-left: 4px; font-size: 10px!important; background: #f3f1e9; padding: 4px 7px; border-radius: 4px; }
-.overviewGrid { display: grid; grid-template-columns: minmax(0,1.9fr) minmax(270px,1fr); gap: 24px; margin-top: 25px; align-items: start; }
+.overviewGrid { display: grid; grid-template-columns: minmax(0,1.9fr) minmax(270px,1fr); gap: 24px; margin-top: 24px; align-items: start; }
 .liveCard { min-width: 0; }
 .livePill { display: inline-flex; align-items: center; vertical-align: middle; gap: 5px; font-family: inherit; font-size: 8px; font-weight: 600; letter-spacing: .08em; color: #65855e; padding: 4px 7px; background: #f0f4e9; border-radius: 4px; margin-left: 10px; }
 .livePill>span { background: currentColor; width: 4px; height: 4px; border-radius: 50%; }
@@ -72,7 +72,7 @@
 .queueRow strong { display: block; font-size: 12px; font-weight: 500; }
 .queueRow>div>span { display: block; font-size: 9px; color: #9b9f92; margin-top: 4px; }
 .queuePosition { width: 17px; color: #939b87; font-size: 10px; font-variant-numeric: tabular-nums; }
-.overviewAside { display: grid; gap: 17px; }
+.overviewAside { display: grid; gap: 24px; }
 .learningCard { background: #e9eddc; border: 1px solid #dfe5d0; padding: 22px 24px 0; border-radius: 11px; position: relative; overflow: hidden; }
 .learningTag { display: inline-flex; align-items: center; gap: 6px; color: #5c7350; font-size: 8px; font-weight: 600; letter-spacing: .12em; position: relative; z-index: 1; }
 .learningCard h2 { font-family: Georgia,serif; color: #36513a; font-weight: 400; line-height: 1.17; font-size: 30px; margin: 23px 0 14px; letter-spacing: -.04em; position: relative; }
@@ -88,7 +88,9 @@
 .classroomCard>div { flex: 1; }
 .classroomCard strong { font-size: 11px; font-weight: 600; }
 .classroomCard p { margin: 5px 0 0; font-size: 9px; color: #8e9585; }
-.recentCard { margin-top: 25px; }
+.recentCard { margin-top: 24px; }
+.pendingPanel { margin: 0 0 24px; min-width: 0; }
+.overviewStats { margin-bottom: 0; }
 .studentCell { display: flex; gap: 10px; align-items: center; }
 .studentCell strong { font-size: 11px; font-weight: 500; white-space: nowrap; }
 .statusDot { width: 4px; height: 4px; background: currentColor; border-radius: 50%; }

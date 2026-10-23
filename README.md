@@ -104,11 +104,19 @@ If the released space has been reassigned, other students' active trips remain i
 
 The usual correction window is **24 hours after return**. Older corrections require an explicit confirmation and a reason of at least 10 characters. The student must still be enrolled in the original class and have no other open break request. Duplicate simultaneous corrections are rejected. The student can use **I'm Back** again when they actually return.
 
+### Class time zones
+
+Create or edit a class in **Class Roster** to choose **USA / Eastern (Default)**, **USA / Central**, **USA / Mountain**, **USA / Pacific**, **USA / Alaska**, **USA / Hawaii**, or **USA / Arizona Mountain**, in that order. New classes and missing settings default to Eastern. Existing saved IANA preferences are retained, including a current setting outside this U.S. menu.
+
+Students inherit their class’s setting automatically. IANA rules handle daylight saving time; Hawaii and Arizona Mountain remain on standard time. Changing a zone changes the displayed clock/calendar only: saved UTC instants, durations, reservations, account records, and classroom history remain intact. Only the owning teacher can edit a class.
+
+The Overview uses consistent **24px** gaps between pending approvals, statistics, live classroom panels, and recent activity on desktop, tablet, and mobile.
+
 ### Rule Offenders
 
 Open **Trip history → Rule Offenders** to see completed and ongoing breaks longer than 12 minutes. Search by student, filter the teacher's active or archived classes, and load older entries. The table shows student, class/period, violation date, duration, and total violations within the teacher's classes.
 
-Entries are derived from reliable trip timestamps and retain the original class/teacher attribution after enrollment changes. Each class's configured IANA timezone controls violation dates, including daylight saving time. Other displayed times use the browser timezone; CSV timestamps are labeled UTC.
+Entries are derived from reliable trip timestamps and retain the original class/teacher attribution after enrollment changes. Each class's configured IANA timezone controls violation dates, including daylight saving time. Classroom activity dates, registrations, departures, returns, reservations, and correction audit times use the relevant class’s selected time zone in both portals and Developer class oversight. Historical trips retain their original class association after transfers. Date filters follow that class’s calendar. CSV timestamps remain labeled UTC, and timers, queue rules, and daily statistics calculations are unchanged.
 
 ### Report a problem
 
