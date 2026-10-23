@@ -39,7 +39,7 @@ async function handle(request:NextRequest, context:Context) {
   async function signIn(nextUser:User) {const session=await createSession(db,nextUser.id);return cookie(NextResponse.json({user:nextUser}),session,request);}
   if(route==='auth/me'&&method==='GET'){
    const {rows}=await db.query("SELECT id FROM users WHERE role='admin' LIMIT 1");
-   return NextResponse.json({user,setupAvailable:false,adminProvisioned:Boolean(rows.length),demo:process.env.DEMO_MODE==='true'&&process.env.LOCAL_DATABASE==='true'&&!process.env.DATABASE_URL});
+   return NextResponse.json({user,setupAvailable:false,adminProvisioned:Boolean(rows.length),...(db.localDevelopment&&process.env.NODE_ENV!=='production'&&!rows.length?{developmentSetup:process.env.DEV_ADMIN_INITIAL_PASSWORD||process.env.ADMIN_INITIAL_PASSWORD?'restart-required':'missing-secret'}:{}),demo:process.env.DEMO_MODE==='true'&&process.env.LOCAL_DATABASE==='true'&&!process.env.DATABASE_URL});
   }
   if(['auth/login','auth/signup'].includes(route)&&method==='POST'){
    const address=request.headers.get('x-vercel-forwarded-for')||request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||'local';

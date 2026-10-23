@@ -52,7 +52,7 @@ test('login has no demo autofill; teacher request is informational and accessibl
   }finally{await context.close();}
 });
 
-test('developer sign-in starts blank and requires manual credentials for the opt-in development privileged account',async({page})=>{
+test('developer sign-in starts blank and requires manual credentials for the automatically initialized development account',async({page})=>{
   await page.goto('/');
   await page.getByRole('link',{name:'Developer sign in',exact:true}).click();
   await expect(page).toHaveURL(/\/admin\/login$/);
@@ -66,7 +66,7 @@ test('developer sign-in starts blank and requires manual credentials for the opt
   await page.getByLabel('Password',{exact:true}).fill(process.env.WATERCYCLE_E2E_ADMIN_PASSWORD!);
   await page.getByRole('button',{name:'Developer Sign In',exact:true}).click();
   await expect(page.locator('form').getByRole('alert')).toContainText('username or password is incorrect');
-  await username.fill('watercycledev');
+  await username.fill('davidanzezhang');
   await page.getByRole('button',{name:'Developer Sign In',exact:true}).click();
   await expect(page).toHaveURL(/\/admin\/dashboard$/);
   await expect(page.getByRole('navigation',{name:'Administrator navigation'})).toBeVisible();

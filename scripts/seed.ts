@@ -4,6 +4,8 @@ import { hashPassword } from '../src/lib/auth';
 import { assertDemoSeedAllowed } from '../src/lib/database-policy';
 import { loadDevelopmentEnvironment } from './development-environment.mjs';
 import { defaultQuestions } from '../src/lib/default-questions';
+import { bootstrapDevelopmentAdministrator, developmentAdminSecret } from '../src/lib/development-admin';
+import { LocalDatabaseBusyError } from '../src/lib/local-database-lock';
 
 type Row = Record<string, unknown>;
 async function seed() {
@@ -71,11 +73,13 @@ async function seed() {
    await students(fourth.id,[['Elena','Torres'],['Owen','Clark']]);
   });
   console.log('Local demo prepared: teachertest and active teststudent in class DEMO1, plus legacy sample classes and biology banks. Existing records, account statuses, and credentials were preserved.');
-  const {rows}=await db.query("SELECT id FROM users WHERE role='admin'");
-  if (!rows.length) console.log('Optional local Developer Portal testing: stop the server and run npm run dev:admin. No administrator or default privileged password was created.');
+  const status=await bootstrapDevelopmentAdministrator(db,developmentAdminSecret(process.env));
+  if(status==='missing-secret')console.warn('Developer account not initialized: configure the private Codespaces secret DEV_ADMIN_INITIAL_PASSWORD (or ADMIN_INITIAL_PASSWORD), restart the Codespace, then run npm run dev. Student and teacher demos are ready; no privileged password was invented. See README.md and npm run dev:check.');
+  else if(status==='legacy-account')console.warn('Existing local administrator has a different username and was preserved. Existing local access still works. Choose a new LOCAL_DATABASE_PATH for the required fresh Developer account; no account was renamed or added.');
+  else console.log(status==='created'?'Development Developer account initialized securely from the private secret.':'Existing Developer account and password preserved. Use npm run dev:check to verify the configured secret.');
  } finally {await db.close();}
 }
 async function enroll(tx:SQL,studentId:unknown,classroomId:unknown) {
  await tx.query('INSERT INTO enrollments(id,student_id,classroom_id,active) VALUES($1,$2,$3,TRUE) ON CONFLICT(student_id,classroom_id) DO NOTHING',[randomUUID(),studentId,classroomId]);
 }
-seed().catch(error=>{console.error(error instanceof Error?error.message:'Seed failed');process.exitCode=1;});
+seed().catch(error=>{console.error(error instanceof Error?error.message:'Development initialization failed.');process.exitCode=error instanceof LocalDatabaseBusyError?75:1;});

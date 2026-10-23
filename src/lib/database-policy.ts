@@ -10,6 +10,7 @@ export function assertLocalDatabaseAllowed(env:Environment) {
 }
 export function assertDemoSeedAllowed(env:Environment) {
  assertLocalDatabaseAllowed(env);
+ if(Object.keys(env).some(key=>key.startsWith('NEXT_PUBLIC_')&&/(DATABASE_URL|ADMIN_INITIAL_PASSWORD)/.test(key)&&env[key]))fail('Database URLs and initialization secrets must never use NEXT_PUBLIC_ environment variables.');
  if(env.NODE_ENV==='production'||env.LOCAL_DATABASE!=='true'||env.DATABASE_URL||env.MIGRATION_DATABASE_URL) fail('Demo seeding requires an explicitly enabled local development database and no managed database URLs.');
 }
 export function validatePostgresUrl(value:string, requireTls=false):string {

@@ -8,7 +8,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       VERCEL: '0'
       WATERCYCLE_ENVIRONMENT: development
@@ -31,3 +31,4 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: npm run test:fresh
+      - run: npm run test:fresh:container

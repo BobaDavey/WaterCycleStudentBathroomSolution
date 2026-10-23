@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0",
+    "dev": "node scripts/start-development.mjs",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
@@ -21,7 +21,9 @@
     "dev:setup": "node scripts/setup-codespaces.mjs",
     "dev:admin": "tsx scripts/bootstrap-development-admin.ts",
     "dev:doctor": "tsx scripts/development-doctor.ts",
-    "test:fresh": "node scripts/test-fresh-development.mjs"
+    "test:fresh": "node scripts/test-fresh-development.mjs",
+    "dev:check": "tsx scripts/development-doctor.ts",
+    "test:fresh:container": "node scripts/test-fresh-container.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.3.14",

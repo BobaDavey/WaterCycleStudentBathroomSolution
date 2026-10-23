@@ -13,12 +13,15 @@ const checkout=path.join(root,'checkout');
 const env={...process.env};
 for(const key of Object.keys(env))if(/DATABASE|ADMIN|VERCEL|LOCAL_DATABASE|DEMO_MODE|WATERCYCLE|^NEXT_|^NODE_ENV$|^__NEXT/.test(key))delete env[key];
 Object.assign(env,{CODESPACES:'true',NEXT_TELEMETRY_DISABLED:'1'});
+const password=process.env.WATERCYCLE_FRESH_ADMIN_PASSWORD||randomBytes(24).toString('base64url');
+env.ADMIN_INITIAL_PASSWORD=password;
+const safe=value=>String(value).split(password).join('[private secret]');
 let server;
 async function run(command,args,extra={},success=true,cwd=checkout){
  const child=spawn(command,args,{cwd,env:{...env,...extra},stdio:['ignore','pipe','pipe']});let output='';
  child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
  const [code]=await once(child,'exit');
- if(success)assert.equal(code,0,`${command} ${args.join(' ')} failed:\n${output}`);else assert.notEqual(code,0,output);
+ if(success)assert.equal(code,0,safe(`${command} ${args.join(' ')} failed:\n${output}`));else assert.notEqual(code,0,output);
  return output;
 }
 async function fingerprint(){return (await run(process.execPath,['--import','tsx','tests/fresh-development-fingerprint.ts'])).trim();}
@@ -26,7 +29,14 @@ async function stop(){
  if(!server)return;
  const child=server;server=undefined;const closed=once(child,'exit');
  if(child.exitCode===null){try{process.kill(-child.pid,'SIGTERM');}catch{}await closed;}
- for(let i=0;i<100;i++){try{await access(path.join(checkout,'.local/data.watercycle.lock'));}catch{break;}await new Promise(resolve=>setTimeout(resolve,50));}
+ for(let i=0;i<200;i++){
+  try{
+   const owner=JSON.parse(await readFile(path.join(checkout,(env.LOCAL_DATABASE_PATH||'.local/data')+'.watercycle.lock'),'utf8'));
+   const stat=await readFile('/proc/'+owner.pid+'/stat','utf8');
+   if(['Z','X'].includes(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0]))break;
+  }catch{break;}
+  await new Promise(resolve=>setTimeout(resolve,100));
+ }
 }
 async function start(){
  const listener=createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
@@ -54,11 +64,13 @@ try{
  const container=JSON.parse(await readFile(path.join(checkout,'.devcontainer/devcontainer.json'),'utf8'));
  Object.assign(env,container.containerEnv);
  assert.equal(container.postCreateCommand,'npm install && npm run dev:setup');
- await run('npm',['install']);await run('npm',['run','dev:setup']);
+ await run('sh',['-c',container.postCreateCommand]);
  assert.match(await run('npm',['run','dev:doctor']),/PASS:/);
  const first=await fingerprint();await run('npm',['run','dev:setup']);assert.equal(await fingerprint(),first,'repeat setup preserves every row');
  let origin=await start();let teacher=client(origin),student=client(origin),anonymous=client(origin);
- assert.equal((await anonymous('auth/me')).body.adminProvisioned,false);
+ assert.equal((await anonymous('auth/me')).body.adminProvisioned,true);
+ const admin=client(origin);assert.equal((await admin('auth/login',{username:'davidanzezhang',password,role:'admin'})).status,200);
+ assert.equal((await admin('admin/state')).body.user.username,'davidanzezhang');
  assert.equal((await teacher('auth/login',{username:'teachertest',password:'1234567890',role:'teacher'})).status,200);
  assert.equal((await student('auth/login',{username:'teststudent',password:'1234567890',role:'student'})).status,200);
  const teacherState=(await teacher('teacher/state')).body;const studentState=(await student('student/state')).body;
@@ -84,19 +96,35 @@ try{
  await stop();
  const preserved=await fingerprint();await run('npm',['run','dev:setup']);assert.equal(await fingerprint(),preserved,'changed password/status/history are never reset');
  assert.match(await run('npm',['run','dev:doctor'],{},false),/password has changed/);
- const password=randomBytes(24).toString('base64url');
- await run('npm',['run','dev:admin'],{DEV_ADMIN_INITIAL_PASSWORD:password});
+
  const withAdmin=await fingerprint();await run('npm',['run','dev:admin'],{DEV_ADMIN_INITIAL_PASSWORD:randomBytes(24).toString('hex')});assert.equal(await fingerprint(),withAdmin);
- for(const extra of [{DATABASE_URL:'postgresql://not-real.invalid/production'},{MIGRATION_DATABASE_URL:'postgresql://not-real.invalid/production'},{VERCEL:'1'},{WATERCYCLE_ENVIRONMENT:'production'},{NODE_ENV:'production'},{ADMIN_INITIAL_PASSWORD:randomBytes(24).toString('hex')}])await run('npm',['run','dev:setup'],extra,false);
+ for(const extra of [{DATABASE_URL:'postgresql://not-real.invalid/production'},{MIGRATION_DATABASE_URL:'postgresql://not-real.invalid/production'},{VERCEL:'1'},{WATERCYCLE_ENVIRONMENT:'production'},{NODE_ENV:'production'}])await run('npm',['run','dev:setup'],extra,false);
  assert.equal(await fingerprint(),withAdmin,'unsafe setup attempts cannot change data');
- origin=await start();const admin=client(origin);teacher=client(origin);student=client(origin);
- assert.equal((await admin('auth/login',{username:'watercycledev',password,role:'admin'})).status,200);
- assert.equal((await admin('admin/state')).body.user.firstName,'Development');
+ origin=await start();const restartedAdmin=client(origin);teacher=client(origin);student=client(origin);
+ assert.equal((await restartedAdmin('auth/login',{username:'davidanzezhang',password,role:'admin'})).status,200);
+ assert.equal((await restartedAdmin('admin/state')).body.user.firstName,'Development');
  assert.equal((await teacher('auth/login',{username:'teachertest',password:changedPassword,role:'teacher'})).status,200);
  assert.equal((await student('auth/login',{username:'teststudent',password:'1234567890',role:'student'})).status,200);
  assert.equal((await student('student/state')).body.user.accountStatus,'deactivated');
  assert.equal((await student('student/quiz',{purpose:'water'})).status,403);
- console.log('PASS: independent fresh clone and npm install; automatic Codespaces setup; exact demo logins, Active enrollment/roster, questions/departure/return, pending approval, opt-in development administrator, RBAC, repeat initialization, preserved password/status/history across restarts, and production isolation.');
-}finally{
- await stop();await rm(root,{recursive:true,force:true});
+ await stop();
+ const noSecret={...env,ADMIN_INITIAL_PASSWORD:'',DEV_ADMIN_INITIAL_PASSWORD:'',LOCAL_DATABASE_PATH:'.local/no-secret'};
+ await run('npm',['run','dev:setup'],noSecret);
+ assert.match(await run('npm',['run','dev:check'],noSecret,false),/Developer account not initialized/);
+ // Test the no-secret demo using the same actual npm run dev launch path.
+ const previousEnv={...env};Object.assign(env,noSecret);
+ origin=await start();teacher=client(origin);student=client(origin);
+ assert.equal((await teacher('auth/login',{username:'teachertest',password:'1234567890',role:'teacher'})).status,200);
+ assert.equal((await student('auth/login',{username:'teststudent',password:'1234567890',role:'student'})).status,200);
+ assert.equal((await client(origin)('auth/me')).body.developmentSetup,'missing-secret');
+ await stop();Object.assign(env,previousEnv);
+ // A private secret arriving after prebuild must provision automatically on launch.
+ env.LOCAL_DATABASE_PATH='.local/no-secret';
+ origin=await start();const lateAdmin=client(origin);
+ assert.equal((await lateAdmin('auth/login',{username:'davidanzezhang',password,role:'admin'})).status,200);
+ await stop();delete env.LOCAL_DATABASE_PATH;
+ console.log('PASS: independent fresh clone and npm install; automatic Codespaces setup; exact demo logins, Active enrollment/roster, questions/departure/return, pending approval, automatic private-secret Developer account, RBAC, repeat initialization, preserved password/status/history across restarts, no-secret demos, late secret injection, and production isolation.');
+}catch(error){throw new Error(safe(error instanceof Error?error.message:'Fresh development verification failed.'));}
+finally{
+ await stop();await rm(root,{recursive:true,force:true,maxRetries:20,retryDelay:100});
 }

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { createDatabase, type Database } from '../src/lib/db';
-import { bootstrapDevelopmentAdministrator } from '../src/lib/development-admin';
+import { bootstrapDevelopmentAdministrator, developmentAdminSecret } from '../src/lib/development-admin';
 import { ADMIN_USERNAME, bootstrapAdministrator, allowedAdministrator } from '../src/lib/bootstrap-admin';
 import { WaterCycle } from '../src/lib/domain';
 import { managedConfiguration, DatabaseConfigurationError } from '../src/lib/database-policy';
@@ -15,17 +15,17 @@ test('local databases never automatically consume a production administrator boo
  try{assert.equal((await db.query("SELECT id FROM users WHERE role='admin'")).rows.length,0);}
  finally{await db.close();if(previous===undefined)delete process.env.ADMIN_INITIAL_PASSWORD;else process.env.ADMIN_INITIAL_PASSWORD=previous;}
 });
-test('opt-in local administrator uses a separate identity, real authentication, singleton protection, and unchanged password on repeat',async()=>{
+test('local administrator uses the required username, real authentication, singleton protection, and unchanged password on repeat',async()=>{
  const db=await createDatabase({directory:'memory://'});const secret=randomBytes(24).toString('base64url');
  try{
   assert.equal(await bootstrapDevelopmentAdministrator(db),'missing-secret');
   assert.equal(await bootstrapDevelopmentAdministrator(db,secret),'created');
   const before=(await db.query("SELECT * FROM users WHERE role='admin'")).rows;
-  const app=new WaterCycle(db);const admin=await app.login({role:'admin',username:'watercycledev',password:secret});
-  assert.equal(admin.firstName,'Development');assert.equal((await app.adminState(admin)).user.username,'watercycledev');
-  await assert.rejects(()=>app.login({role:'admin',username:ADMIN_USERNAME,password:secret}),/incorrect/);
-  await assert.rejects(()=>app.login({role:'teacher',username:'watercycledev',password:secret}),/incorrect/);
-  await assert.rejects(()=>app.login({role:'admin',username:'watercycledev',password:'IncorrectPassword'}),/incorrect/);
+  const app=new WaterCycle(db);const admin=await app.login({role:'admin',username:ADMIN_USERNAME,password:secret});
+  assert.equal(admin.firstName,'Development');assert.equal((await app.adminState(admin)).user.username,ADMIN_USERNAME);
+  await assert.rejects(()=>app.login({role:'admin',username:'watercycledev',password:secret}),/incorrect/);
+  await assert.rejects(()=>app.login({role:'teacher',username:ADMIN_USERNAME,password:secret}),/incorrect/);
+  await assert.rejects(()=>app.login({role:'admin',username:ADMIN_USERNAME,password:'IncorrectPassword'}),/incorrect/);
   assert.equal(await bootstrapDevelopmentAdministrator(db,randomBytes(24).toString('hex')),'exists');
   assert.deepEqual((await db.query("SELECT * FROM users WHERE role='admin'")).rows,before);
   for(const sql of ["DELETE FROM users WHERE role='admin'","UPDATE users SET enabled=FALSE WHERE role='admin'","UPDATE users SET username='otheradmin' WHERE role='admin'","UPDATE users SET role='teacher' WHERE role='admin'"])await assert.rejects(()=>db.query(sql));
@@ -33,11 +33,11 @@ test('opt-in local administrator uses a separate identity, real authentication, 
   assert.equal((await db.query("SELECT first_name FROM users WHERE role='admin'")).rows[0].first_name,'Local');
  }finally{await db.close();}
 });
-test('local bootstrap preserves an existing privileged account and managed databases cannot accept the development administrator',async()=>{
+test('local bootstrap preserves an existing privileged account and refuses managed database adapters',async()=>{
  const db=await createDatabase({directory:'memory://'});const secret=randomBytes(24).toString('hex');
  try{
   await bootstrapAdministrator(db,secret);const before=(await db.query('SELECT * FROM users')).rows;
-  await assert.rejects(()=>bootstrapDevelopmentAdministrator(db,secret),/existing administrator/);
+  assert.equal(await bootstrapDevelopmentAdministrator(db,randomBytes(24).toString('hex')),'exists');
   assert.deepEqual((await db.query('SELECT * FROM users')).rows,before);
   assert.equal(allowedAdministrator({query:db.query},'watercycledev'),false);
   await assert.rejects(()=>bootstrapDevelopmentAdministrator({localDevelopment:false} as Database,secret),/isolated local/);
@@ -66,4 +66,42 @@ test('setup diagnostics distinguish missing config, missing migrations and unava
  assert.match(developmentDiagnostic({code:'42P01'},env)!,/migrations/);
  assert.match(developmentDiagnostic({code:'ECONNREFUSED'},env)!,/unavailable/);
  for(const production of [{NODE_ENV:'production'},{VERCEL:'1'},{WATERCYCLE_ENVIRONMENT:'preview'}])assert.equal(developmentDiagnostic(new DatabaseConfigurationError('private diagnostic'),production),null);
+});
+
+test('development bootstrap uses only supplied private secrets with explicit development-secret precedence',()=>{
+ assert.equal(developmentAdminSecret({}),undefined);
+ const primary=randomBytes(24).toString('hex'),legacy=randomBytes(24).toString('hex');
+ assert.equal(developmentAdminSecret({ADMIN_INITIAL_PASSWORD:legacy}),legacy);
+ assert.equal(developmentAdminSecret({DEV_ADMIN_INITIAL_PASSWORD:primary,ADMIN_INITIAL_PASSWORD:legacy}),primary);
+ assert.equal(developmentAdminSecret({DEV_ADMIN_INITIAL_PASSWORD:'',ADMIN_INITIAL_PASSWORD:legacy}),legacy);
+});
+test('invalid secrets cannot create privileged accounts and demo setup rejects browser-public secrets',async()=>{
+ const db=await createDatabase({directory:'memory://'});
+ try{
+  await assert.rejects(()=>bootstrapDevelopmentAdministrator(db,'short'),/8–128/);
+  assert.equal((await db.query("SELECT id FROM users WHERE role='admin'")).rows.length,0);
+  const previous=process.env.NEXT_PUBLIC_DEV_ADMIN_INITIAL_PASSWORD;process.env.NEXT_PUBLIC_DEV_ADMIN_INITIAL_PASSWORD=randomBytes(24).toString('hex');
+  try{await assert.rejects(()=>bootstrapDevelopmentAdministrator(db,randomBytes(24).toString('hex')),/NEXT_PUBLIC_/);}
+  finally{if(previous===undefined)delete process.env.NEXT_PUBLIC_DEV_ADMIN_INITIAL_PASSWORD;else process.env.NEXT_PUBLIC_DEV_ADMIN_INITIAL_PASSWORD=previous;}
+ }finally{await db.close();}
+});
+test('required username collision preserves a regular account and creates no administrator',async()=>{
+ const db=await createDatabase({directory:'memory://'});
+ try{
+  await db.query("INSERT INTO users(id,role,first_name,last_name,username) VALUES('collision','teacher','Existing','Teacher',$1)",[ADMIN_USERNAME]);
+  const before=(await db.query('SELECT * FROM users')).rows;
+  await assert.rejects(()=>bootstrapDevelopmentAdministrator(db,randomBytes(24).toString('hex')),/regular account/);
+  assert.deepEqual((await db.query('SELECT * FROM users')).rows,before);
+ }finally{await db.close();}
+});
+test('a previous local administrator is never renamed, reset or supplemented',async()=>{
+ const db=await createDatabase({directory:'memory://'});
+ try{
+  await db.query('ALTER TABLE users DROP CONSTRAINT administrator_identity');
+  await db.query("ALTER TABLE users ADD CONSTRAINT administrator_identity CHECK(role<>'admin' OR (username='watercycledev' AND enabled=TRUE AND classroom_id IS NULL))");
+  await db.query("INSERT INTO users(id,role,first_name,last_name,username) VALUES('legacy-admin','admin','Development','Administrator','watercycledev')");
+  const before=(await db.query('SELECT * FROM users')).rows;
+  assert.equal(await bootstrapDevelopmentAdministrator(db,randomBytes(24).toString('hex')),'legacy-account');
+  assert.deepEqual((await db.query('SELECT * FROM users')).rows,before);
+ }finally{await db.close();}
 });

@@ -15,7 +15,7 @@ async function login(page: Page, username: string, password: string, teacher = f
 async function adminLogin(page: Page) {
   await page.goto('/admin/login');
   await expect(page.getByLabel('Developer username', { exact: true })).toHaveValue('');
-  await page.getByLabel('Developer username', { exact: true }).fill('watercycledev');
+  await page.getByLabel('Developer username', { exact: true }).fill('davidanzezhang');
   await page.getByLabel('Password', { exact: true }).fill(process.env.WATERCYCLE_E2E_ADMIN_PASSWORD!);
   await page.getByRole('button', { name: 'Developer Sign In' }).click();
   await expect(page).toHaveURL(/\/admin\/dashboard$/);

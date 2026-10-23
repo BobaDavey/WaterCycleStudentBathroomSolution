@@ -2,6 +2,7 @@ import { open, readFile, unlink, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 interface Owner { pid: number; token: string; boot: string | null; start: string | null; }
+export class LocalDatabaseBusyError extends Error {}
 async function readText(file: string) { try { return await readFile(file,'utf8'); } catch { return null; } }
 async function fingerprint(pid: number) {
  const stat = await readText(`/proc/${pid}/stat`);
@@ -35,14 +36,14 @@ export async function lockLocalDatabase(directory: string): Promise<() => Promis
   } catch(error) {
    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
    const contents=await readText(file);
-   if (!contents) throw new Error('The local database is being opened by another process. Stop the other server before retrying.');
+   if (!contents) throw new LocalDatabaseBusyError('The local database is being opened by another process. Stop the other server before retrying.');
    let previous: Owner;
    try { previous=JSON.parse(contents) as Owner; } catch { throw new Error('The local database lock is invalid. Confirm no server is running before removing its .watercycle.lock file.'); }
    if (!Number.isInteger(previous.pid) || previous.pid<1 || !previous.token) throw new Error('The local database lock is invalid. Confirm no server is running before removing its .watercycle.lock file.');
-   if (await alive(previous)) throw new Error('This local database is already open in another process. Stop the other server or use a different LOCAL_DATABASE_PATH.');
+   if (await alive(previous)) throw new LocalDatabaseBusyError('This local database is already open in another process. Stop the other server or use a different LOCAL_DATABASE_PATH.');
    // Recheck ownership before reclaiming a lock left by a dead process or a restored snapshot.
    if (await readText(file) === contents) await unlink(file).catch(()=>{});
   }
  }
- throw new Error('The local database is busy. Stop other local instances and retry.');
+ throw new LocalDatabaseBusyError('The local database is busy. Stop other local instances and retry.');
 }

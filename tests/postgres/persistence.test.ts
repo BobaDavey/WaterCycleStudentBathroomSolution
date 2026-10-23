@@ -13,6 +13,8 @@ import { baselineSchema, migrations, latestMigrationVersion } from '../../src/li
 import { applyManagedMigrations, schemaStatus } from '../../src/lib/managed-database';
 import { bootstrapAdministrator } from '../../src/lib/bootstrap-admin';
 import { hashPassword } from '../../src/lib/auth';
+import { WaterCycle } from '../../src/lib/domain';
+import { bootstrapDevelopmentAdministrator } from '../../src/lib/development-admin';
 import type { DatabaseBinding } from '../../src/lib/database-policy';
 const base=process.env.WATERCYCLE_POSTGRES_TEST_URL!;
 const container=process.env.WATERCYCLE_POSTGRES_CONTAINER!;
@@ -71,6 +73,16 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
  });
  it('retains administrator password hashes when initialization is repeated with a different secret and when runtime restarts',async()=>{
   const before=await snapshot('wc_production');const pool=poolFor('wc_production');try{assert.equal(await bootstrapAdministrator(adapter(pool),randomBytes(24).toString('hex')),'exists');}finally{await pool.end();}assert.deepEqual(await snapshot('wc_production'),before);
+ });
+ it('never provisions development accounts into managed production or accepts absent public demos',async()=>{
+  const before=await snapshot('wc_production');
+  const db=await createDatabase({url:urlFor('wc_production',true),binding:production});
+  try{
+   await assert.rejects(()=>bootstrapDevelopmentAdministrator(db,randomBytes(24).toString('hex')));
+   const app=new WaterCycle(db);
+   for(const [username,role] of [['teststudent','student'],['teachertest','teacher']] as const)await assert.rejects(()=>app.login({username,role,password:'1234567890'}),/incorrect/);
+  }finally{await db.close();}
+  assert.deepEqual(await snapshot('wc_production'),before);
  });
  it('uses a non-owner runtime role that cannot drop, truncate, recreate, or rewrite schema metadata',async()=>{
   const db=await createDatabase({url:urlFor('wc_production',true),binding:production});try{

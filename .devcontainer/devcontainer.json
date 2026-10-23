@@ -16,5 +16,12 @@
       "onAutoForward": "notify",
       "protocol": "http"
     }
+  },
+  "postStartCommand": "npm run dev:setup -- --if-idle",
+  "waitFor": "postCreateCommand",
+  "secrets": {
+    "DEV_ADMIN_INITIAL_PASSWORD": {
+      "description": "Private development-only Developer password. Required only for Developer Portal testing; student/teacher demos work without it."
+    }
   }
 }

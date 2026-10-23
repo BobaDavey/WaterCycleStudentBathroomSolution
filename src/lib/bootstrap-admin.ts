@@ -3,11 +3,12 @@ import type { Database, SQL } from './db';
 import { hashPassword } from './auth';
 
 export const ADMIN_USERNAME = 'davidanzezhang';
-export const DEVELOPMENT_ADMIN_USERNAME = 'watercycledev';
+export const DEVELOPMENT_ADMIN_USERNAME = ADMIN_USERNAME;
+const legacyDevelopmentAdminUsername = 'watercycledev';
 export function allowedAdministrator(db: SQL, username: unknown) {
- return username === ADMIN_USERNAME || (db.localDevelopment === true && username === DEVELOPMENT_ADMIN_USERNAME);
+ return username === ADMIN_USERNAME || (db.localDevelopment === true && username === legacyDevelopmentAdminUsername);
 }
-export function reservedAdministratorUsername(username: string) { return username === ADMIN_USERNAME || username === DEVELOPMENT_ADMIN_USERNAME; }
+export function reservedAdministratorUsername(username: string) { return username === ADMIN_USERNAME || username === legacyDevelopmentAdminUsername; }
 export type AdminBootstrapStatus = 'created' | 'exists' | 'missing-secret';
 
 /** No public endpoint calls this helper. Existing passwords are never reset. */
