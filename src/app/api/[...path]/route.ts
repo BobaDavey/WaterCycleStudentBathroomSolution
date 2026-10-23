@@ -8,6 +8,7 @@ import { ruleOffendersSchema } from '@/lib/rule-offenders';
 import type { User } from '@/lib/contracts';
 import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
 import { developmentDiagnostic } from '@/lib/development-diagnostics';
+import { logRequestFailure, requestReference, type RequestStage } from '@/lib/server-diagnostics';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
@@ -21,6 +22,9 @@ function cookie(response: NextResponse, token:string, request:NextRequest) {
  return response;
 }
 async function handle(request:NextRequest, context:Context) {
+ const requestId=requestReference();
+ let stage:RequestStage='request_validation';
+ let endpoint:'/api/auth/me'|'/api/health'|'/api/[...path]'='/api/[...path]';
  try {
   if (!['GET','HEAD'].includes(request.method)) {
    if (!isSameOrigin(request.headers.get('origin'),request.headers.get('host'),process.env.VERCEL==='1')) throw new AppError(403,'This request must come from the app’s own page. Please refresh and try again.');
@@ -29,15 +33,20 @@ async function handle(request:NextRequest, context:Context) {
   }
   const {path}=await context.params;
   const route=path.join('/'); const method=request.method;
+  if(route==='auth/me')endpoint='/api/auth/me';else if(route==='health')endpoint='/api/health';
   if(route==='auth/setup')throw new AppError(410,'Teacher accounts are created by the administrator. Public teacher registration is unavailable.');
+  stage='database_initialization';
   const db=await getDatabase();const app=new WaterCycle(db);const token=request.cookies.get(cookieName)?.value;
   if(route==='health'&&method==='GET'){await db.query('SELECT 1');return NextResponse.json({ok:true});}
+  stage='session_lookup';
   let user=await sessionUser(db,token);
+  stage='application';
   const classroomId=request.nextUrl.searchParams.get('classroomId') || undefined;
   async function json() {const text=await request.text();if(text.length>32768)throw new AppError(413,'This request is too large.');try{return JSON.parse(text || '{}');}catch{throw new AppError(400,'Please send valid JSON.');}}
   async function authenticated() {if(!user)throw new AppError(401,'Please sign in to continue.');return user;}
   async function signIn(nextUser:User) {const session=await createSession(db,nextUser.id);return cookie(NextResponse.json({user:nextUser}),session,request);}
   if(route==='auth/me'&&method==='GET'){
+   stage='authentication_state';
    const {rows}=await db.query("SELECT id FROM users WHERE role='admin' LIMIT 1");
    return NextResponse.json({user,setupAvailable:false,adminProvisioned:Boolean(rows.length),...(db.localDevelopment&&process.env.NODE_ENV!=='production'&&!rows.length?{developmentSetup:process.env.DEV_ADMIN_INITIAL_PASSWORD||process.env.ADMIN_INITIAL_PASSWORD?'restart-required':'missing-secret'}:{}),demo:process.env.DEMO_MODE==='true'&&process.env.LOCAL_DATABASE==='true'&&!process.env.DATABASE_URL});
   }
@@ -103,15 +112,15 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='admin/profile'&&method==='PATCH'){await app.updateAdminProfile(user,adminProfileSchema.parse(await json()));return ok();}
   throw new AppError(404,'That page or action was not found.');
  }catch(error){
-  const diagnostic=developmentDiagnostic(error,process.env);
-  if(diagnostic){console.error(diagnostic);return NextResponse.json({error:'Development database setup is unavailable. Check the server terminal and the README troubleshooting steps.'},{status:503,headers:{'Cache-Control':'no-store'}});}
   if(error instanceof AppError)return NextResponse.json({error:error.message},{status:error.status,headers:{'Cache-Control':'no-store'}});
   if(error instanceof z.ZodError)return NextResponse.json({error:error.issues[0]?.message||'Please check your entries.'},{status:400});
-  const pg=error as {code?:string;constraint?:string};
+  const pg=error&&typeof error==='object'?error as {code?:string;constraint?:string}:{};
   if(pg.code==='23505')return NextResponse.json({error:pg.constraint?.includes('code')?'That five-character enrollment code is already in use. Choose another code.':pg.constraint?.includes('admin')?'Only the single authorized administrator account can exist.':'That username is already registered, or that student already has an enrollment or pass.'},{status:409});
   if(pg.code==='23514')return NextResponse.json({error:pg.constraint?.includes('code')?'Enrollment codes must contain exactly five letters or numbers.':'This change violates an account or classroom rule.'},{status:400});
-  console.error('WaterCycle request failed:',error instanceof Error?error.name:'unknown error');
-  return NextResponse.json({error:'The server could not complete this request. Please try again or contact your teacher.'},{status:500});
+  const failure=logRequestFailure(error,{requestId,method:request.method,endpoint,stage});
+  const diagnostic=developmentDiagnostic(error,process.env);
+  if(diagnostic)console.error(diagnostic);
+  return NextResponse.json({error:diagnostic?'Development database setup is unavailable. Check the server terminal and the README troubleshooting steps.':'The server could not complete this request. Please try again or contact your teacher.',referenceId:requestId},{status:diagnostic||failure.category!=='internal'?503:500,headers:{'Cache-Control':'no-store','X-Request-ID':requestId}});
  }
 }
 export async function GET(request:NextRequest,context:Context){const response=await handle(request,context);response.headers.set('Cache-Control','no-store');return response;}

@@ -229,6 +229,8 @@ Legacy testing fixtures remain available: teachers `morganreed` / `mariamiller` 
 
 Follow the [production database and recovery guide](docs/production-database.md) before classroom use. Production and Preview require separate managed PostgreSQL databases, separately scoped Vercel variables, and distinct database identities. Runtime database credentials cannot own tables, change schemas, truncate, or hard-delete classroom records.
 
+**Vercel is Ready but the site says “Let’s reconnect”?** A new Neon connection still requires reviewed schema initialization and a restricted runtime role. Follow the [Neon and Vercel first deployment walkthrough](docs/production-database.md#neon-and-vercel-first-deployment-walkthrough) for the exact console steps, private configuration, backup, migration and grant commands. The read-only `npm run db:check` verifies runtime readiness before redeployment. Runtime failures now log safe categories/codes and a request reference rather than only `error`; public visitors do not receive database details.
+
 Builds and server startup never migrate or seed a managed database. Reviewed migrations run through a separate operator command with a verified backup reference and expected schema version. Redeployments reconnect to the same persistent database and preserve existing accounts, passwords, sessions, rosters, activities, trips, and problem reports. An empty, incompatible, or incorrectly scoped database is refused rather than initialized automatically.
 
 Vercel runs `npm ci` and `npm run build`; its local filesystem is not persistent storage. This repository update does not itself create a managed database, configure Vercel, or publish a deployment.

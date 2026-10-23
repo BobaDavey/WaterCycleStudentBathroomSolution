@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "admin:bootstrap": "node --env-file-if-exists=.env.local --import tsx scripts/bootstrap-admin.ts",
     "db:status": "node --env-file-if-exists=.env.local --import tsx scripts/database-status.ts",
+    "db:check": "node --env-file-if-exists=.env.local --import tsx scripts/check-runtime-database.ts",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
     "db:backup": "node --env-file-if-exists=.env.local --import tsx scripts/backup-database.ts",
     "test:postgres": "node scripts/test-postgres.mjs",

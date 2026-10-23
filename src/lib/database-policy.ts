@@ -1,7 +1,8 @@
 export type DatabaseEnvironment = 'production' | 'preview' | 'development';
 export interface DatabaseBinding { environment: DatabaseEnvironment; databaseId: string; }
 export type Environment = Record<string, string | undefined>;
-export class DatabaseConfigurationError extends Error { constructor(message:string){super(message);this.name='DatabaseConfigurationError';} }
+export type DatabaseConfigurationCode = 'DB_CONFIGURATION' | 'DB_MIGRATIONS_REQUIRED' | 'DB_SCHEMA_INCOMPATIBLE' | 'DB_IDENTITY_MISMATCH' | 'DB_RUNTIME_ROLE_UNSAFE' | 'DB_PERMISSIONS';
+export class DatabaseConfigurationError extends Error { constructor(message:string,public readonly code:DatabaseConfigurationCode='DB_CONFIGURATION'){super(message);this.name='DatabaseConfigurationError';} }
 function fail(message:string):never { throw new DatabaseConfigurationError(message); }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function hosted(env:Environment) { return env.VERCEL === '1' || env.WATERCYCLE_ENVIRONMENT === 'production' || env.WATERCYCLE_ENVIRONMENT === 'preview'; }

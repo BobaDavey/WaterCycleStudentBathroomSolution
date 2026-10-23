@@ -24,7 +24,7 @@ assert.match(container??'',/^watercycle-persistence-/);assert.equal(new URL(base
 const production:DatabaseBinding={environment:'production',databaseId:randomUUID()};const preview:DatabaseBinding={environment:'preview',databaseId:randomUUID()};
 const credentials={admin:randomBytes(24).toString('hex'),temporary:randomBytes(24).toString('hex'),teacher:randomBytes(24).toString('hex'),student:randomBytes(24).toString('hex')};
 const rolePassword=randomBytes(24).toString('hex');
-const databases=['wc_production','wc_preview','wc_restore','wc_legacy','wc_empty','wc_broken'];
+const databases=['wc_production','wc_preview','wc_restore','wc_legacy','wc_empty','wc_broken','wc_diagnostics'];
 const tables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events','student_username_counters'];
 let owner:Pool,saved:Record<string,string>;
 function urlFor(name:string,runtime=false){assert.ok(databases.includes(name));const url=new URL(base);url.pathname=`/${name}`;if(runtime){url.username='wc_runtime';url.password=rolePassword;}return url.toString();}
@@ -36,6 +36,19 @@ async function grantRuntime(name:string){const pool=poolFor(name);try{await pool
 async function migrate(name:string,binding:DatabaseBinding,expectedVersion=0,backupReference='verified-isolated-fixture-snapshot'){const db=await createDatabase({url:urlFor(name),binding,bootstrapAdmin:false,migration:{expectedVersion,backupReference}});await db.close();}
 async function run(args:string[],extra:Record<string,string|undefined>={},input?:Buffer){const child=spawn(process.execPath,args,{env:{...process.env,...extra} as NodeJS.ProcessEnv,stdio:['pipe','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',data=>stdout+=data);child.stderr.on('data',data=>stderr+=data);child.stdin.end(input);const code=await new Promise<number|null>(resolve=>{child.once('error',()=>resolve(-1));child.once('exit',resolve);});return{code,stdout,stderr};}
 function deploymentEnv(name='wc_production',binding=production){return{DATABASE_URL:urlFor(name,true),WATERCYCLE_ENVIRONMENT:binding.environment,WATERCYCLE_DATABASE_ID:binding.databaseId,VERCEL:'1',VERCEL_ENV:binding.environment,NODE_ENV:'production',LOCAL_DATABASE:'',DEMO_MODE:'',LOCAL_DATABASE_PATH:'',ADMIN_INITIAL_PASSWORD:randomBytes(24).toString('hex'),WATERCYCLE_TEST_CREDENTIALS:JSON.stringify(credentials),WATERCYCLE_TEST_SAVED:JSON.stringify(saved)};}
+async function unusedPort(){const listener=createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const address=listener.address();assert.ok(address&&typeof address!=='string');const port=address.port;await new Promise<void>(resolve=>listener.close(()=>resolve()));return port;}
+async function productionServer<T>(env:Record<string,string|undefined>,check:(origin:string)=>Promise<T>){
+ const port=await unusedPort(),origin=`http://127.0.0.1:${port}`;
+ const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',String(port)],{env:{...process.env,...env} as NodeJS.ProcessEnv,stdio:['ignore','pipe','pipe']});
+ server.stdout.resume();let logs='';server.stderr.on('data',data=>logs+=data);const exited=once(server,'exit');
+ let result:T;
+ try{
+  let ready=false;
+  for(let attempt=0;attempt<100;attempt++){if(server.exitCode!==null)break;try{if((await fetch(`${origin}/admin/login`)).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
+  assert.equal(ready,true,'isolated production HTTP server must start');result=await check(origin);
+ }finally{if(server.exitCode===null)server.kill('SIGTERM');await exited;}
+ return{result,logs};
+}
 
 describe('Real PostgreSQL deployment persistence and recovery',()=>{
  before(async()=>{
@@ -73,6 +86,48 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
  });
  it('retains administrator password hashes when initialization is repeated with a different secret and when runtime restarts',async()=>{
   const before=await snapshot('wc_production');const pool=poolFor('wc_production');try{assert.equal(await bootstrapAdministrator(adapter(pool),randomBytes(24).toString('hex')),'exists');}finally{await pool.end();}assert.deepEqual(await snapshot('wc_production'),before);
+ });
+ it('diagnoses fresh production setup through the real HTTP endpoint and serves anonymous auth after reviewed migration and restricted grants',{timeout:120000},async()=>{
+  await stat('.next/BUILD_ID');
+  const env=deploymentEnv('wc_diagnostics');
+  async function failure(settings:Record<string,string|undefined>,code:string,sqlState?:string){
+   const {result,logs}=await productionServer(settings,async origin=>{
+    const response=await fetch(`${origin}/api/auth/me`);assert.equal(response.status,503);
+    const body=await response.json();assert.equal(typeof body.error,'string');assert.match(body.referenceId,/^[0-9a-f-]{36}$/);assert.equal(response.headers.get('x-request-id'),body.referenceId);assert.equal(response.headers.get('cache-control'),'no-store');
+    assert.ok(!JSON.stringify(body).includes(code),'public response must not disclose database setup details');return body.referenceId;
+   });
+   const line=logs.split('\n').find(line=>line.startsWith('WaterCycle request failed: '));assert.ok(line);
+   const diagnostic=JSON.parse(line.slice('WaterCycle request failed: '.length));
+   assert.equal(diagnostic.code,code);assert.equal(diagnostic.requestId,result);assert.equal(diagnostic.stage,'database_initialization');if(sqlState)assert.equal(diagnostic.sqlState,sqlState);
+   for(const secret of [rolePassword,...Object.values(credentials),new URL(settings.DATABASE_URL!).password])assert.ok(!logs.includes(secret));
+   assert.doesNotMatch(logs,/postgres(?:ql)?:\/\//);
+  }
+  // A newly connected provider database is not initialized by Vercel or startup.
+  await failure({...env,DATABASE_URL:urlFor('wc_diagnostics')},'DB_MIGRATIONS_REQUIRED');
+  let pool=poolFor('wc_diagnostics');try{assert.equal((await pool.query("SELECT COUNT(*)::int AS n FROM pg_tables WHERE schemaname='public'")).rows[0].n,0);}finally{await pool.end();}
+  await migrate('wc_diagnostics',production);
+  await failure({...env,DATABASE_URL:urlFor('wc_diagnostics')},'DB_RUNTIME_ROLE_UNSAFE');
+  await grantRuntime('wc_diagnostics');
+  const healthy=await productionServer(env,async origin=>{
+   const response=await fetch(`${origin}/api/auth/me`);assert.equal(response.status,200);assert.deepEqual(await response.json(),{user:null,setupAvailable:false,adminProvisioned:false,demo:false});
+   const invalid=await fetch(`${origin}/api/auth/me`,{headers:{Cookie:`${cookieName}=${'f'.repeat(64)}`}});assert.equal(invalid.status,200);assert.equal((await invalid.json()).user,null);
+   const ready=await fetch(`${origin}/api/health`);assert.equal(ready.status,200);assert.deepEqual(await ready.json(),{ok:true});
+   const rejected=await fetch(`${origin}/api/auth/login`,{method:'POST',headers:{Origin:origin.replace('http:','https:'),'Content-Type':'application/json'},body:JSON.stringify({username:'nonexistentaccount',password:credentials.teacher,role:'teacher'})});assert.equal(rejected.status,401);assert.match((await rejected.json()).error,/incorrect/);
+  });assert.ok(!healthy.logs.includes('WaterCycle request failed:'));
+  const check=await run(['--import','tsx','scripts/check-runtime-database.ts'],env);assert.equal(check.code,0,check.stderr);assert.equal(JSON.parse(check.stdout).ok,true);
+  const status=await run(['--import','tsx','scripts/database-status.ts'],{...env,DATABASE_URL:'',MIGRATION_DATABASE_URL:urlFor('wc_diagnostics')});assert.equal(status.code,0,status.stderr);assert.equal(JSON.parse(status.stdout).currentVersion,latestMigrationVersion);assert.equal(JSON.parse(status.stdout).bound,true);
+  const before=await snapshot('wc_diagnostics');
+  for(const table of ['watercycle_migrations','users']){
+   pool=poolFor('wc_diagnostics');try{
+    await pool.query(`REVOKE SELECT ON public.${table} FROM wc_runtime`);
+    await failure(env,'DB_PERMISSIONS',table==='watercycle_migrations'?'42501':undefined);
+    const check=await run(['--import','tsx','scripts/check-runtime-database.ts'],env);assert.notEqual(check.code,0);assert.match(check.stderr,/DB_PERMISSIONS/);
+   }finally{await pool.query(`GRANT SELECT ON public.${table} TO wc_runtime`);await pool.end();}
+  }
+  const incorrect=new URL(env.DATABASE_URL);incorrect.password=randomBytes(24).toString('hex');await failure({...env,DATABASE_URL:incorrect.toString()},'DB_AUTHENTICATION','28P01');
+  const unavailable=new URL(env.DATABASE_URL);unavailable.port=String(await unusedPort());await failure({...env,DATABASE_URL:unavailable.toString()},'DB_CONNECTION');
+  await failure({...env,WATERCYCLE_DATABASE_ID:randomUUID()},'DB_IDENTITY_MISMATCH');
+  assert.deepEqual(await snapshot('wc_diagnostics'),before);
  });
  it('never provisions development accounts into managed production or accepts absent public demos',async()=>{
   const before=await snapshot('wc_production');

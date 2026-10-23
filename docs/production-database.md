@@ -4,6 +4,139 @@ WaterCycle stores accounts, password hashes, enrollment, learning attempts, sess
 
 A GitHub push changes source code. A Vercel redeployment replaces application processes. Neither operation should replace the PostgreSQL resource or initialize classroom data.
 
+## Neon and Vercel first deployment walkthrough
+
+Use this walkthrough when Vercel is Ready but `/api/auth/me` fails after connecting a new Neon database. The integration supplies a URL; it does **not** install WaterCycle's tables, bind the database identity, or create a restricted application role. A Ready build does not prove database readiness. An empty schema fails the startup check; after migration, an owner connection is also intentionally refused. The old log containing only `error` discarded PostgreSQL's reason and cannot establish the exact original driver failure.
+
+These steps preserve the existing database resource and its records. They never reset, seed, truncate or delete classroom data. Use a trusted personal computer outside GitHub Codespaces. Codespaces intentionally refuse production maintenance connections. Keep connection strings and passwords in your password manager/private environment file, never in chat, GitHub, screenshots or Vercel build commands. Console labels may vary slightly by provider version.
+
+### Step 1: Get the current code on your computer
+
+Install [Node.js 24 LTS](https://nodejs.org/) and [Git](https://git-scm.com/downloads) if necessary. Open a terminal on your own computer. For a new checkout:
+
+```bash
+git clone https://github.com/BobaDavey/WaterCycleStudentBathroomSolution.git
+cd WaterCycleStudentBathroomSolution
+npm ci
+```
+
+For an existing checkout, save any unrelated local work first, then use `git pull --ff-only origin main` and `npm ci`. Do not use a reset command. The install command does not initialize a managed database.
+
+### Step 2: Identify the exact production database and identity
+
+In **Vercel → your WaterCycle project → Settings → Environment Variables**, find the **Production** value of `WATERCYCLE_DATABASE_ID`. Keep this same UUID; do not generate a replacement. Confirm `WATERCYCLE_ENVIRONMENT` is `production`.
+
+Open the connected Neon resource from **Vercel → Storage → your Neon database → Open/Manage in Neon**, or sign in at [Neon Console](https://console.neon.tech/) and open that same project. Select the branch/database that the Production connection uses. Do not assume that an unrelated Neon project or preview branch contains your production records.
+
+In Neon click **Connect**, select that branch, database and the existing **owner** role, and turn **Connection pooling OFF** to obtain the **direct maintenance** URL. Copy it privately for the next step. Do not put this owner URL into the Vercel runtime configuration.
+
+### Step 3: Create a private maintenance configuration
+
+In your local checkout, create `.env.local` with your editor. This file is ignored by Git. Replace each angle-bracket placeholder privately; keep the double quotes around the connection string. Use this minimal configuration in a fresh operator checkout:
+
+```dotenv
+NODE_ENV=production
+WATERCYCLE_ENVIRONMENT=production
+WATERCYCLE_DATABASE_ID=<the existing Production UUID from Vercel>
+MIGRATION_DATABASE_URL="<the direct owner connection copied from Neon>"
+DATABASE_URL=
+LOCAL_DATABASE=false
+DEMO_MODE=false
+LOCAL_DATABASE_PATH=
+```
+
+Keep the file accessible only to your own OS account. Do not enable Codespaces or Vercel flags in this local terminal. Values already exported in your terminal take precedence over `.env.local`; use a fresh terminal without earlier database settings if unsure.
+
+Run the read-only inspection:
+
+```bash
+npm run db:status
+```
+
+The result includes `currentVersion`, `latestVersion`, `pending`, and `bound`. For a genuinely new empty database, expect `currentVersion: 0`, pending versions 1–6, and `bound: false`. This release's latest version is 6. If you see an identity mismatch, incompatible history, or missing expected tables, **stop** and follow the recovery section; do not delete the ledger, recreate tables, or change the UUID to force the check to pass.
+
+### Step 4: Verify a backup before initialization or migration
+
+Even an empty database needs a verified initial backup reference. In Neon open **Branches → Create branch** (sometimes **New branch**), choose the exact production branch as the parent at the **current** point in time, and give the backup branch a descriptive name. Wait for it to finish. Open **SQL Editor**, select the **backup** branch and database, and verify its table list/counts match the source. Record the actual backup branch ID and creation time privately. Retain it until the release is accepted. This is a restricted recovery copy; never connect a test application or Vercel Preview to a backup containing real classroom records.
+
+Use this procedure only when your plan supports a retained branch/recovery checkpoint and you have verified that it is accessible. Alternatively, use the `db:backup` and isolated restore procedure in section 5 below with compatible PostgreSQL client tools. Do not invent a backup reference or proceed without recoverability.
+
+### Step 5: Apply only the reviewed pending migrations
+
+Review the pending SQL in `src/lib/migrations.ts`. If Step 3 showed **currentVersion 0**, run this command after replacing the backup placeholder with the actual verified reference:
+
+```bash
+npm run db:migrate -- --expected-version 0 --backup-reference YOUR_VERIFIED_NEON_BACKUP_BRANCH_ID
+npm run db:status
+```
+
+If `currentVersion` was another number, use **that exact number** instead of 0. If `pending` is empty and `bound` is true, skip migration. Successful initialization shows `pending: []`, `bound: true`, and `currentVersion: 6`. Migrations use a transaction and preserve existing records. Do not add this command to Vercel's install, build or startup commands.
+
+### Step 6: Create a dedicated restricted runtime role
+
+In Neon open **SQL Editor**. Select the **production branch and database**, using the existing **owner** role. A database role is different from a WaterCycle teacher or Developer sign-in account.
+
+First check whether the proposed runtime role already exists:
+
+```sql
+SELECT rolname, rolsuper, rolcreatedb, rolcreaterole
+FROM pg_roles WHERE rolname = 'watercycle_runtime';
+```
+
+If there are no rows, generate a strong **new runtime-database password** in your private password manager and create the role below. Replace the placeholder **only in Neon's private SQL editor**, using a generated password without a single quote, and never save the completed query in this repository or share it. This is not your WaterCycle Developer password.
+
+```sql
+CREATE ROLE watercycle_runtime LOGIN
+  PASSWORD 'REPLACE_WITH_A_NEW_PRIVATE_RUNTIME_PASSWORD'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+```
+
+If the role already exists, do not recreate it or reset its password. Review its existing grants/memberships first; use the intended restricted role and its stored private credentials. A role created through a provider UI may inherit elevated provider roles, so do not assume every newly created provider role is restricted. Do not grant owner or `neon_superuser` membership.
+
+Next, run the **complete grant SQL in section 4 below** in this same production database. It grants the needed application access, including `student_username_counters`, and read-only migration metadata access. It does not change accounts, passwords, classroom data or history. If database `CONNECT` has been revoked from `PUBLIC`, the owner must also grant `CONNECT` on this existing database to the runtime role. Never use `GRANT ALL`, ownership, schema creation, table deletion or truncate grants to bypass an error.
+
+### Step 7: Test the runtime credentials before deploying
+
+In Neon **Connect**, keep the same production branch/database and select the `watercycle_runtime` role. Copy its provider-generated connection string with TLS (pooling may be enabled for the Vercel runtime). If a manually created SQL role is not listed, use the same connection details with the runtime role/password entered privately; use URL-encoded credentials rather than unescaped special characters. Keep the direct owner URL for maintenance only.
+
+In your **private local** `.env.local`, set `DATABASE_URL` to that runtime URL. Leave the environment and UUID unchanged, and run:
+
+```bash
+npm run db:check
+```
+
+It must report `ok: true`. This command is read-only and checks connectivity, applied migrations, database identity, the non-owner role and required grants, and the anonymous authentication-state queries. It does not migrate, seed, create accounts or print secrets. A failure prints a safe category/code and a remediation hint; use the table below rather than weakening the protections.
+
+### Step 8: Configure Vercel Production and redeploy
+
+Go to **Vercel → WaterCycle → Settings → Environment Variables**. Edit the **Production-scoped** `DATABASE_URL` to the **runtime-role** URL from Step 7. If the integration manages that variable, update its role/connection configuration through the integration settings; verify the effective Production value is the restricted role's connection. Do not delete the database resource or share its owner connection as a workaround.
+
+Keep `WATERCYCLE_ENVIRONMENT=production` and the **same** `WATERCYCLE_DATABASE_ID`. Remove `MIGRATION_DATABASE_URL`, `ADMIN_INITIAL_PASSWORD`, `DEV_ADMIN_INITIAL_PASSWORD` and `LOCAL_DATABASE_PATH` from Vercel; leave `LOCAL_DATABASE` and `DEMO_MODE` unset or false. Preview must use a separate database/UUID/credentials. Do not override Vercel's own `VERCEL` or `VERCEL_ENV` variables.
+
+Keep **Settings → Build and Deployment** at `npm ci` / `npm run build`. Then open **Deployments → latest Production deployment → ⋯ → Redeploy** so the saved variables are used.
+
+### Step 9: Verify the live site without logging in
+
+Open `https://YOUR_SITE/api/health`: expect HTTP 200 and `{"ok":true}`. Open `https://YOUR_SITE/api/auth/me` in a private/incognito browser window: expect HTTP 200 with `"user":null` (and no credentials or classroom data). The home page should now show sign-in. If it still fails, open **Vercel → your deployment → Logs/Runtime Logs**, filter `/api/auth/me`, and find `WaterCycle request failed:`. Share only its `code`, `category`, `stage` and `requestId` if you need help. Do not share raw connection strings, passwords, cookies or classroom records.
+
+Existing WaterCycle accounts are retained by migrations and should sign in normally. A genuinely empty Neon database does not contain accounts from an independent Codespace database. Do not seed public demos in Production or register replacements for records that need to be imported. If this is an intentionally new installation with no privileged account (`adminProvisioned: false`), set `ADMIN_INITIAL_PASSWORD` privately **only in the operator's local environment**, run `npm run admin:bootstrap`, verify sign-in, then remove that one-time secret. The bootstrap preserves an already existing privileged account and its password. Create teacher accounts through the existing portal. Importing needed Codespaces records is a separate, validated transfer; this walkthrough does not overwrite them or move them automatically.
+
+### Safe diagnostic codes
+
+| Server log code | Meaning and safe next action |
+| --- | --- |
+| `DB_MIGRATIONS_REQUIRED` | Missing setup or a missing table/column (`42P01` / `42703`). Inspect `db:status`; back up and apply only reviewed pending migrations. If the ledger already says complete, stop and reconcile/restore instead of replaying migrations. |
+| `DB_SCHEMA_INCOMPATIBLE` | Inconsistent/future ledger or missing expected tables. Preserve the database and reconcile/recover deliberately. |
+| `DB_RUNTIME_ROLE_UNSAFE` | The connection uses an owner or elevated role. Use the restricted runtime role; do not disable the check. |
+| `DB_PERMISSIONS` | Missing required grants, forbidden metadata writes, PostgreSQL `42501`, or a read-only target (`25006`). Review section 4 and the intended writable production endpoint. |
+| `DB_AUTHENTICATION` | PostgreSQL rejected the **database** login (`28P01` / `28000`). Correct the private runtime connection credentials. This is different from an incorrect WaterCycle username/password, which returns HTTP 401. |
+| `DB_CONNECTION` / `DB_TLS` / `DB_PROTOCOL` | Networking/provider availability/limits, certificate verification, or pooler/protocol failure. Check the private provider connection; do not disable TLS. Use a direct connection for maintenance. |
+| `DB_CONFIGURATION` / `DB_DATABASE_NOT_FOUND` | Missing/mismatched environment configuration or nonexistent target database. Verify Vercel scope and private connection settings without replacing the production resource. |
+| `DB_IDENTITY_MISMATCH` | Wrong resource, deployment environment or UUID. Restore the intended connection/binding; do not rebind production as Preview. |
+| `DB_QUERY_FAILED` | An allowlisted SQLSTATE identifies a query, constraint or database-internal failure. Keep the reference/code for investigation; raw SQL and driver messages remain private. This returns HTTP 500. |
+
+Infrastructure failures return HTTP 503 with a generic public message and request reference, without exposing the detailed category to visitors. Unexpected application failures remain HTTP 500. Normal unauthenticated `/api/auth/me` returns HTTP 200 with `user: null`; protected endpoints and incorrect app credentials return HTTP 401. Logs contain only allowlisted codes, fixed hints, endpoint templates and stages, never driver messages, SQL, URLs, passwords or student details. A production build checks environment configuration but intentionally does not connect or initialize the database.
+
 ## Safeguards in this release
 
 - Hosted Production and Preview require a PostgreSQL URL with TLS. Local filesystem storage and demo mode are refused, including when a development flag is accidentally enabled.
