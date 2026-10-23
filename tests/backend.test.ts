@@ -1,10 +1,11 @@
+import { WorkflowTestApp as WaterCycle } from './student-fixtures';
 import { approveStudent } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '../src/lib/db';
 import { AppError, createSession, digest, hashPassword, rateLimit, sessionUser, userFrom, usernameFor, verifyPassword } from '../src/lib/auth';
-import { WaterCycle, questionSchema, requirePasswordChange } from '../src/lib/domain';
+import { questionSchema, requirePasswordChange } from '../src/lib/domain';
 import type { Question, Quiz, User } from '../src/lib/contracts';
 
 const password = 'Biology-test-2026!';
@@ -73,7 +74,7 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
 
   it('uses salted passwords and restricts login to the requested role', async () => {
     const learner = await student('Jamie', 'Chen');
-    assert.equal((await app.login({ username: 'JAMIECHEN', password, role: 'student' })).id, learner.id);
+    assert.equal((await app.login({ username: learner.username.toUpperCase(), password, role: 'student' })).id, learner.id);
     await assert.rejects(() => app.login({ username: 'jamiechen', password: 'incorrect', role: 'student' }), rejectsStatus(401));
     await assert.rejects(() => app.login({ username: 'jamiechen', password, role: 'teacher' }), rejectsStatus(401));
     await assert.rejects(() => app.login({ username: 'missing', password, role: 'student' }), rejectsStatus(401));
@@ -84,17 +85,14 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
     assert.equal(usernameFor('José', "O'Neil"), 'joseoneil');
   });
 
-  it('lets a first sign-up claim a teacher-created roster entry once', async () => {
-    const entry = await app.addRoster(teacher, { firstName: 'Jamie', lastName: 'Chen' });
-    assert.equal(entry.registered, false);
-    const learner = await student('Jamie', 'Chen');
-    assert.equal(learner.id, entry.id);
-    assert.equal(learner.username, 'jamiechen');
-    assert.equal((await app.teacherState(teacher)).students[0].registered, true);
-    await assert.rejects(() => student('Jamie', 'Chen'), rejectsStatus(409));
-    await assert.rejects(() => app.signup({ firstName: 'Wrong', lastName: 'Code', password, classroomCode: 'UNKNOWN' }), rejectsStatus(400));
-    await app.updateRoster(teacher, learner.id, { enabled: false });
-    assert.equal((await app.login({ username: 'jamiechen', password, role: 'student' })).accountStatus,'deactivated');
+  it('keeps teacher-created accounts distinct from identical-name registrations and approves their own enrollments', async () => {
+    const entry=await app.addRoster(teacher,{firstName:'Jamie',lastName:'Chen'});assert.equal(entry.registered,false);
+    const learner=await student('Jamie','Chen');assert.notEqual(learner.id,entry.id);assert.notEqual(learner.username,entry.username);
+    const another=await student('Jamie','Chen');assert.notEqual(another.username,learner.username);
+    await app.updateRoster(teacher,entry.id,{password:'Temporary-2026!'});await app.updateRoster(teacher,entry.id,{accountStatus:'active'});
+    assert.equal((await app.login({username:entry.username,password:'Temporary-2026!',role:'student'})).mustChangePassword,true);
+    await assert.rejects(()=>app.enrollStudent(learner,'UNKNOWN'),rejectsStatus(400));
+    await app.updateRoster(teacher,learner.id,{enabled:false});assert.equal((await app.studentState(learner)).enrollments[0].status,'deactivated');
   });
 
   it('shows one distinct question at a time without answer keys until two answers are correct', async () => {
@@ -257,7 +255,8 @@ describe('WaterCycle persistent classroom workflow', { concurrency: false }, () 
     for (const learner of [first, second, third]) await pass(learner);
     const token = await createSession(db, first.id);
     await app.updateRoster(teacher, first.id, { enabled: false });
-    assert.equal((await sessionUser(db, token))?.accountStatus,'deactivated');
+    assert.equal((await sessionUser(db, token))?.accountStatus,'active');
+    assert.equal((await app.studentState(first)).enrollments[0].status,'deactivated');
     assert.equal((await app.studentState(third)).currentVisit?.status, 'waiting');
     assert.equal((await app.studentState(first)).canRequestPass,false);
     assert.equal((await app.rosterDetail(teacher, first.id)).visits[0].status, 'out');

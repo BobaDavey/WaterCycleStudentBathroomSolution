@@ -152,6 +152,34 @@ CREATE TABLE problem_report_events (
 CREATE INDEX problem_report_events_report ON problem_report_events(report_id,changed_at,id);
 `;
 
+export const enrollmentScheduleMigration = `
+-- Retain legacy account fields and historical membership rows. New permissions
+-- belong to each enrollment; account_suspended is a separate security control.
+ALTER TABLE users ADD COLUMN account_suspended BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE users SET account_suspended=TRUE WHERE role='student' AND enabled=FALSE;
+ALTER TABLE enrollments ADD COLUMN status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','deactivated'));
+ALTER TABLE enrollments ADD COLUMN approved_at TIMESTAMPTZ;
+ALTER TABLE enrollments ADD COLUMN approved_by TEXT REFERENCES users(id);
+UPDATE enrollments e SET status=CASE WHEN NOT e.active OR NOT u.enabled OR u.account_status='deactivated' THEN 'deactivated' WHEN u.account_status='active' THEN 'approved' ELSE 'pending' END,
+ approved_at=CASE WHEN e.active AND u.classroom_id=e.classroom_id THEN u.approved_at END,
+ approved_by=CASE WHEN e.active AND u.classroom_id=e.classroom_id THEN u.approved_by END FROM users u WHERE u.id=e.student_id;
+DROP INDEX enrollments_one_active_student;
+CREATE INDEX enrollments_pending ON enrollments(classroom_id,joined_at,id) WHERE active=TRUE AND status='pending';
+ALTER TABLE classrooms ADD COLUMN start_time TEXT;
+ALTER TABLE classrooms ADD COLUMN end_time TEXT;
+ALTER TABLE classrooms ADD COLUMN schedule_days INTEGER[] NOT NULL DEFAULT ARRAY[1,2,3,4,5];
+ALTER TABLE classrooms ADD CONSTRAINT class_schedule_times CHECK(
+ (start_time IS NULL AND end_time IS NULL) OR
+ (start_time IS NOT NULL AND end_time IS NOT NULL AND start_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' AND end_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' AND start_time<end_time));
+ALTER TABLE classrooms ADD CONSTRAINT class_schedule_days CHECK(cardinality(schedule_days)>0 AND schedule_days <@ ARRAY[1,2,3,4,5,6,7]);
+ALTER TABLE visits ADD COLUMN cancellation_reason TEXT;
+CREATE TABLE student_username_counters (base TEXT PRIMARY KEY,next_number BIGINT NOT NULL CHECK(next_number>0));
+-- Seed the high-water mark from all roles, without changing any username.
+INSERT INTO student_username_counters(base,next_number)
+ SELECT parts[1],MAX(parts[2]::bigint)+1 FROM (SELECT regexp_match(username,'^(.+?)([0-9]{2,9})$') AS parts FROM users) names
+ WHERE parts IS NOT NULL GROUP BY parts[1];
+`;
+
 export const migrations = [
  {version:1,sql:multiTeacherMigration},
  {version:2,sql:studentBreakMigration},
@@ -167,6 +195,7 @@ CREATE TABLE watercycle_migration_runs (
  id UUID PRIMARY KEY, environment TEXT NOT NULL, database_id UUID NOT NULL, backup_reference TEXT NOT NULL,
  versions_before INTEGER[] NOT NULL, versions_after INTEGER[] NOT NULL, completed_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
 );`},
+ {version:6,sql:enrollmentScheduleMigration},
 ] as const;
 export const latestMigrationVersion = migrations.at(-1)!.version;
 /** Caller holds the PostgreSQL initialization lock and transaction. */

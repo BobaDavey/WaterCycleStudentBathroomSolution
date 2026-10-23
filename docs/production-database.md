@@ -77,17 +77,23 @@ This command is read-only. It reports the configured environment/UUID, applied v
 
 Obtain and verify a backup as described below **before** running migrations. For a fresh empty database, take an initial provider snapshot or empty-database backup as the initialization reference too.
 
-For an existing installation at version 4, this release uses:
+For an existing installation at version 5, this release uses:
 
 ```bash
-npm run db:migrate -- --expected-version 4 --backup-reference YOUR_VERIFIED_SNAPSHOT_OR_BACKUP_ID
+npm run db:migrate -- --expected-version 5 --backup-reference YOUR_VERIFIED_SNAPSHOT_OR_BACKUP_ID
 ```
 
-For a genuinely empty database, use `--expected-version 0`. Always use the current version shown by `db:status`; do not guess it or delete ledger entries. Version 5 adds database identity and migration audit tables. It does not change existing accounts, passwords, rosters, trip timestamps, reports, or learning progress. An unbound database at version 5 also requires a backup reference before first binding.
+For a genuinely empty database, use `--expected-version 0`. Always use the current version shown by `db:status`; do not guess it or delete ledger entries. Version 5 adds database identity and migration audit tables. Version 6 adds class-specific enrollment permissions, schedules without arbitrary defaults, cancellation explanations, a separate account suspension flag, and atomic username counters; existing usernames, hashes, memberships, approvals, and history are retained. It does not change existing accounts, passwords, rosters, trip timestamps, reports, or learning progress. An unbound database at version 5 also requires a backup reference before first binding.
 
 Run `db:status` again. All migrations should be applied and `bound` should be `true`. Repeating a fully applied migration command is a no-op; it does not seed or reset data. Keep the backup reference privately with the release record.
 
 First-time account setup, if needed, is a separate authorized operator action using the existing private provisioning CLI after migration. Use a private initialization secret and remove it afterward. Running that CLI against an existing account preserves its password. The runtime never provisions accounts. Account identities and passwords should stay in your private operational records.
+
+### Version 6 classroom/enrollment rollout
+
+Pause classroom writes during the schema/code cutover; older application versions assume one active membership and must not keep writing once multiple enrollments become available. After a verified backup and reviewed migration, grant the restricted runtime role `SELECT, INSERT, UPDATE ON public.student_username_counters` (in addition to its existing grants), deploy this release, verify health and existing logins, then set schedules for existing classes. Do not redeploy the old single-class code against new multiple memberships.
+
+Existing classes intentionally retain NULL start/end times until their owning teacher configures them. New requests are blocked, but outside students can still return and timers/correction histories remain intact. Existing enabled/approval fields are retained; enrollment approvals are copied reliably from them. Previously disabled students also retain an account-wide suspension for conservative security. A class teacher may reactivate an enrollment but cannot clear an account-wide restriction; only an authorized operator should review and clear such a suspension in a separately approved maintenance action. The migration does not change passwords, usernames, accounts, historical timestamps, or report contents.
 
 ## 4. Create a restricted runtime database role
 
@@ -102,7 +108,7 @@ GRANT SELECT, INSERT, UPDATE ON
   public.classrooms, public.users, public.sessions, public.questions,
   public.quizzes, public.visits, public.enrollments, public.rate_limits,
   public.student_status_events, public.break_corrections,
-  public.problem_reports, public.problem_report_events
+  public.problem_reports, public.problem_report_events, public.student_username_counters
 TO watercycle_runtime;
 GRANT DELETE ON public.sessions TO watercycle_runtime;
 GRANT SELECT ON

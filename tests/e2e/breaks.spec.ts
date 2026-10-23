@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import type { StudentState, TeacherState } from '../../src/lib/contracts';
 import { answerCurrent, qualifyBreak, startLearning } from './break-helpers';
 
@@ -89,7 +89,7 @@ test('purpose-first learning keeps cumulative progress after a wrong answer and 
     expect(bounds!.width).toBeLessThanOrEqual(390);
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
     expect(bounds!.height).toBeLessThanOrEqual(844);
-    await expect(guide.getByRole('heading', { name: 'Request a Break', exact: true })).toBeVisible();
+    await expect(guide.getByRole('heading', { name: 'Join Your Classes', exact: true })).toBeVisible();
     await expect(guide.getByRole('heading', { name: 'Return to Class', exact: true })).toBeVisible();
     await guide.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
     await expect(guide).not.toBeVisible();

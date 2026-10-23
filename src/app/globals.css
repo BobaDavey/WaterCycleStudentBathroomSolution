@@ -11,3 +11,5 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition:none!important;scroll-behavior:auto!important}}
 
 .teacher-request-modal{max-width:500px;min-width:0;line-height:1.9}.teacher-request-modal:focus{outline:none}.teacher-request-modal .modal-header>div{min-width:0}.teacher-request-modal .modal-header h2{margin-top:14px;font-size:23px}.teacher-request-modal .modal-header svg{color:var(--green)}.teacher-request-modal>p{font-size:13px;color:var(--muted)}.teacher-request-modal a{color:var(--green);text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+
+.registration-confirmation.auth-page{grid-template-columns:1fr;place-items:center;padding:24px;gap:0}.registration-confirmation .auth-panel{width:min(100%,580px);min-height:0;border:1px solid var(--line);border-radius:16px;padding:32px}.registration-confirmation h1,.registration-confirmation h2{overflow-wrap:anywhere}.registration-confirmation .auth-form-wrap>p{margin:20px 0;line-height:1.7}

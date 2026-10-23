@@ -1,4 +1,5 @@
-import { test,expect, type Page } from '@playwright/test';
+import {scheduleClassForm} from './enrollment-helpers';
+import { test,expect, type Page } from './fixtures';
 import { US_TIME_ZONES, classDateKey, formatClassTimestamp } from '../../src/lib/time-zones';
 import type { StudentState,TeacherState } from '../../src/lib/contracts';
 import { qualifyBreak } from './break-helpers';
@@ -16,7 +17,7 @@ test('create/edit menus save all seven U.S. zones in order, default Eastern, and
   await expect(select).toHaveValue('America/New_York');
   expect(await select.locator('option').allTextContents()).toEqual(US_TIME_ZONES.map(item=>item.label));
   await dialog.getByLabel('Class name',{exact:true}).fill(`US time zone ${index}`);await dialog.getByLabel('Enrollment code',{exact:true}).fill(`TZ00${index}`);
-  await select.selectOption(zone.value);await dialog.getByRole('button',{name:'Create Class',exact:true}).click();await expect(dialog).not.toBeVisible();
+  await select.selectOption(zone.value);await scheduleClassForm(page);await dialog.getByRole('button',{name:'Create Class',exact:true}).click();await expect(dialog).not.toBeVisible();
   const card=page.getByRole('article').filter({has:page.getByRole('heading',{name:`US time zone ${index}`,exact:true})});
   await card.getByRole('button',{name:'Edit Class',exact:true}).click();dialog=page.getByRole('dialog');await expect(dialog.getByLabel('Class timezone',{exact:true})).toHaveValue(zone.value);
   const next=US_TIME_ZONES[(index+1)%US_TIME_ZONES.length];await dialog.getByLabel('Class timezone',{exact:true}).selectOption(next.value);
@@ -24,7 +25,7 @@ test('create/edit menus save all seven U.S. zones in order, default Eastern, and
   await card.getByRole('button',{name:'Edit Class',exact:true}).click();await expect(page.getByRole('dialog').getByLabel('Class timezone',{exact:true})).toHaveValue(next.value);
   await page.getByRole('button',{name:'Close dialog',exact:true}).click();
  }
- const created=await page.request.post('/api/teacher/classes',{headers,data:{name:'Existing London zone',code:'TZOLD',timeZone:'Europe/London'}});expect(created.ok()).toBe(true);
+ const created=await page.request.post('/api/teacher/classes',{headers,data:{name:'Existing London zone',code:'TZOLD',timeZone:'Europe/London',startTime:'00:00',endTime:'23:59'}});expect(created.ok()).toBe(true);
  await page.reload();await page.getByRole('button',{name:'Class Roster',exact:true}).click();
  const card=page.getByRole('article').filter({has:page.getByRole('heading',{name:'Existing London zone',exact:true})});
  await card.getByRole('button',{name:'Edit Class',exact:true}).click();const dialog=page.getByRole('dialog');
@@ -39,11 +40,11 @@ test('class-local registrations, live break clocks, date filters and 24px Overvi
  const teacherContext=await browser.newContext({timezoneId:'Asia/Tokyo',locale:'en-US'}),studentContext=await browser.newContext({timezoneId:'Asia/Tokyo',locale:'en-US'});
  try{
   const page=await teacherContext.newPage();await teacherLogin(page);
-  const created=await page.request.post('/api/teacher/classes',{headers,data:{name:'Pacific browser class',code:'TZACT',timeZone:'America/Los_Angeles'}});expect(created.ok()).toBe(true);
+  const created=await page.request.post('/api/teacher/classes',{headers,data:{name:'Pacific browser class',code:'TZACT',timeZone:'America/Los_Angeles',startTime:'00:00',endTime:'23:59'}});expect(created.ok()).toBe(true);
   const classroom=(await created.json()).classroom;
   const lastName=`Learner${Date.now()}`;
   const signup=await studentContext.request.post('/api/auth/signup',{headers,data:{firstName:'Timezone',lastName,password:'DevelopmentTimezone2026!',classroomCode:'TZACT'}});expect(signup.ok()).toBe(true);
-  const user=(await signup.json()).user;
+  const user=(await signup.json()).user;expect((await studentContext.request.post('/api/student/enroll',{headers,data:{classroomCode:'TZACT'}})).ok()).toBe(true);
   const state=await(await page.request.get('/api/teacher/state')).json() as TeacherState;
   const pending=state.pendingStudents.find(item=>item.id===user.id)!;
   const region=page.getByRole('region',{name:/Pending Student Approvals/});const row=region.getByRole('row').filter({hasText:user.username});

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import type { RuleOffendersState, TeacherState } from '../../src/lib/contracts';
 
 const origin='http://127.0.0.1:3100';
@@ -47,8 +47,7 @@ test('login has no demo autofill; teacher request is informational and accessibl
     await page.getByRole('button',{name:'I’m a student',exact:true}).click();
     await page.getByRole('button',{name:'Create a student account',exact:true}).click();
     await expect(page.getByRole('button',{name:'Create my account',exact:true})).toBeVisible();
-    await page.getByLabel('Classroom code',{exact:true}).fill('bio01');
-    await expect(page.getByLabel('Classroom code',{exact:true})).toHaveValue('BIO01');
+    await expect(page.getByLabel('Classroom code',{exact:true})).toHaveCount(0);await expect(page.getByLabel('Username',{exact:true})).toHaveCount(0);await expect(page.getByText(/automatically assigns a unique username/)).toBeVisible();
   }finally{await context.close();}
 });
 

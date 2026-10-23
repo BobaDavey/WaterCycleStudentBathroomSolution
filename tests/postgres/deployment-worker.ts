@@ -16,9 +16,13 @@ async function main(){
    const account=await app.createTeacher(admin,{firstName:'Persistence',lastName:'Teacher',username:'persistenceteacher',email:'persistence@school.test',password:passwords.temporary,enabled:true});
    let teacher=await app.login({username:account.username,password:passwords.temporary,role:'teacher'});
    await app.changePassword(teacher,passwords.temporary,passwords.teacher);teacher=await app.login({username:account.username,password:passwords.teacher,role:'teacher'});
-   const classroom=await app.createClass(teacher,{name:'Persistent Biology',period:'1',code:'PER01'});
-   const student=await app.signup({firstName:'Persistent',lastName:'Student',password:passwords.student,classroomCode:classroom.code!});
-   await app.signup({firstName:'Pending',lastName:'Student',password:passwords.student,classroomCode:classroom.code!});
+   const classroom=await app.createClass(teacher,{name:'Persistent Biology',period:'1',code:'PER01',startTime:'00:00',endTime:'23:59'});
+   // Disposable PostgreSQL regression fixture: exercise persisted custom days
+   // so real production-server restart checks also run on weekends. New classes
+   // created through the product still default to Monday–Friday.
+   await db.query('UPDATE classrooms SET schedule_days=ARRAY[1,2,3,4,5,6,7] WHERE id=$1',[classroom.id]);
+   const student=await app.signup({firstName:'Persistent',lastName:'Student',password:passwords.student});await app.enrollStudent(student,classroom.code!);
+   const pending=await app.signup({firstName:'Pending',lastName:'Student',password:passwords.student});await app.enrollStudent(pending,classroom.code!);
    await app.updateRoster(teacher,student.id,{accountStatus:'active'});await app.completeTutorial(student);
    async function answer(quiz:Quiz){const {rows:[row]}=await db.query<{questions:Question[]}>('SELECT questions FROM quizzes WHERE id=$1',[quiz.id]);return app.answerQuiz(student,{quizId:quiz.id,questionId:quiz.question.id,questionToken:quiz.questionToken,answer:row.questions.find(q=>q.id===quiz.question.id)!.correctIndex});}
    const first=await answer(await app.newQuiz(student,'restroom'));const trip=(await answer(first.quiz!)).visit!;
@@ -32,7 +36,7 @@ async function main(){
   }else{
    const saved=JSON.parse(process.env.WATERCYCLE_TEST_SAVED!);
    const teacher=await app.login({username:'persistenceteacher',password:passwords.teacher,role:'teacher'});
-   const student=await app.login({username:'persistentstudent',password:passwords.student,role:'student'});
+   const student=await app.login({username:'persistentstudent01',password:passwords.student,role:'student'});
    assert.equal(student.id,saved.studentId);assert.equal((await sessionUser(db,saved.session))?.id,student.id);
    const state=await app.studentState(student);assert.equal(state.user.accountStatus,'active');assert.equal(state.user.tutorialCompleted,true);assert.equal(state.activeQuiz?.correctCount,1);
    assert.equal(state.recentVisits.length,1);assert.equal(state.recentVisits[0].corrections.length,1);assert.ok(state.recentVisits[0].warningAcknowledgedAt);

@@ -188,3 +188,12 @@
 .seriousWarning strong { font-weight: 800; }
 .warningDialog { border: 2px solid #d6a49a; }
 .warningIcon { color: #b42318; background: #fbeae6; border-color: #ebc7bd; }
+
+.myClasses { margin-bottom: 24px; min-width: 0; }
+.enrollmentList { display: grid; gap: 16px; padding: 0 24px 24px; }
+.enrollmentItem { display: flex; justify-content: space-between; gap: 16px; border: 1px solid #e6e9de; border-radius: 10px; padding: 18px; min-width: 0; }
+.enrollmentItem h3 { margin: 0 0 8px; font-size: 15px; }
+.enrollmentItem p { margin: 5px 0; font-size: 12px; overflow-wrap: anywhere; }
+@media(max-width:600px) { .enrollmentItem { flex-direction: column; } .myClasses :global(.card-header) { flex-wrap: wrap; gap: 12px; } .enrollmentList { padding: 0 16px 16px; } }
+
+.myClasses :global(.card-header) p { overflow-wrap: anywhere; }

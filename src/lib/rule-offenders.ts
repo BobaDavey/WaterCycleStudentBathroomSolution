@@ -29,7 +29,7 @@ export async function loadRuleOffenders(db: SQL, teacherId: string | null, filte
     WITH timed AS (
       SELECT v.id,v.student_id,v.classroom_id,v.left_at,v.returned_at,
         c.name AS classroom_name,c.period,c.time_zone,
-        u.first_name||' '||u.last_name AS student_name,
+        u.first_name||' '||u.last_name AS student_name,u.username AS student_username,
         v.left_at+INTERVAL '12 minutes' AS violated_at,
         CASE WHEN v.status='out' AND v.returned_at IS NULL THEN statement_timestamp()
              WHEN v.status='returned' THEN v.returned_at END AS ended_at,
@@ -44,14 +44,14 @@ export async function loadRuleOffenders(db: SQL, teacherId: string | null, filte
     SELECT *,statement_timestamp() AS server_now,
       to_char(violated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at FROM violations
     WHERE ($2::text IS NULL OR classroom_id=$2)
-      AND ($3::text IS NULL OR student_name ILIKE $3)
+      AND ($3::text IS NULL OR student_name ILIKE $3 OR student_username ILIKE $3)
       AND ($4::timestamptz IS NULL OR (violated_at,id)<($4::timestamptz,$5::text))
     ORDER BY violated_at DESC,id DESC LIMIT $6`,
     [teacherId,input.classroomId ?? null,search,cursor?.at ?? null,cursor?.id ?? null,input.limit+1]);
   const iso = (value: unknown) => new Date(value as string | Date).toISOString();
   const visible = rows.slice(0,input.limit);
   const violations: RuleViolation[] = visible.map(row => ({
-    id:String(row.id), studentId:String(row.student_id), studentName:String(row.student_name),
+    id:String(row.id), studentId:String(row.student_id), studentName:String(row.student_name),studentUsername:String(row.student_username??''),
     classroomId:String(row.classroom_id),classroomName:String(row.classroom_name),period:row.period == null ? null : String(row.period),
     timeZone:effectiveTimeZone(row.time_zone as string | null),violatedAt:iso(row.violated_at),leftAt:iso(row.left_at),
     returnedAt:row.returned_at ? iso(row.returned_at) : null,durationSeconds:Number(row.duration_seconds),

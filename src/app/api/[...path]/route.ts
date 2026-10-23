@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
 const ok = () => NextResponse.json({ok:true});
 const reopenSchema = z.object({resolveOlder:z.boolean().optional(),reason:z.string().trim().max(2000).optional()});
-const quizStartSchema = z.object({purpose:z.enum(['restroom','water'],{error:'Choose Use Restroom or Drink Water before continuing.'})});
+const quizStartSchema = z.object({purpose:z.enum(['restroom','water'],{error:'Choose Use Restroom or Drink Water before continuing.'}),classroomId:z.string().min(1).max(200).optional()});
 const answerSchema = z.object({quizId:z.string().uuid(),questionId:z.string().min(1).max(200),questionToken:z.string().uuid(),answer:z.number().int().min(0).max(3)});
 const quizCancelSchema = z.object({quizId:z.string().uuid()});
 function cookie(response: NextResponse, token:string, request:NextRequest) {
@@ -69,8 +69,9 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='admin/reports'&&method==='GET')return NextResponse.json(await app.problemReports(user,reportFiltersSchema.parse(Object.fromEntries(request.nextUrl.searchParams))));
   if(path.length===3&&path[0]==='admin'&&path[1]==='reports'){if(method==='GET')return NextResponse.json(await app.problemReport(user,path[2]));if(method==='PATCH'){await app.changeReportStatus(user,path[2],reportStatusSchema.parse(await json()).status);return ok();}}
   if(path.length===4&&path[0]==='teacher'&&path[1]==='visits'&&path[3]==='reopen'&&method==='POST'){await app.reopenVisit(user,path[2],reopenSchema.parse(await json()));return ok();}
-  if(route==='student/enroll'&&method==='POST'){await app.enrollStudent(user,enrollmentSchema.parse(await json()).classroomCode);return ok();}
-  if(route==='student/quiz'&&method==='POST'){await rateLimit(db,`quiz:${user.id}`,30);const input=quizStartSchema.parse(await json());return NextResponse.json(await app.newQuiz(user,input.purpose));}
+  if(route==='student/enroll/preview'&&method==='POST'){await rateLimit(db,`enroll-lookup:${user.id}`,30);return NextResponse.json({classroom:await app.previewEnrollment(user,enrollmentSchema.parse(await json()).classroomCode)});}
+  if(route==='student/enroll'&&method==='POST'){await rateLimit(db,`enroll:${user.id}`,30);const input=enrollmentSchema.parse(await json());await app.enrollStudent(user,input.classroomCode,input.classroomId);return ok();}
+  if(route==='student/quiz'&&method==='POST'){await rateLimit(db,`quiz:${user.id}`,30);const input=quizStartSchema.parse(await json());return NextResponse.json(await app.newQuiz(user,input.purpose,input.classroomId));}
   if(route==='student/quiz/answer'&&method==='POST')return NextResponse.json(await app.answerQuiz(user,answerSchema.parse(await json())));
   if(route==='student/quiz/cancel'&&method==='POST'){await app.cancelQuiz(user,quizCancelSchema.parse(await json()).quizId);return ok();}
   if(route==='student/quiz/submit')throw new AppError(410,'This learning screen has changed. Refresh the page to answer one question at a time.');
@@ -82,11 +83,11 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='teacher/roster'&&method==='POST')return NextResponse.json({student:await app.addRoster(user,rosterSchema.parse(await json()),classroomId)});
   if(path.length===3&&path[0]==='teacher'&&path[1]==='roster'){
    if(method==='GET')return NextResponse.json(await app.rosterDetail(user,path[2],classroomId));
-   if(method==='PATCH'){await app.updateRoster(user,path[2],rosterUpdateSchema.parse(await json()));return ok();}
+   if(method==='PATCH'){await app.updateRoster(user,path[2],rosterUpdateSchema.parse(await json()),classroomId);return ok();}
   }
   if(path.length===4&&path[0]==='teacher'&&path[1]==='roster'&&method==='POST'){
-   if(path[3]==='remove'){await app.removeStudent(user,path[2]);return ok();}
-   if(path[3]==='transfer'){await app.transferStudent(user,path[2],transferSchema.parse(await json()).classroomId);return ok();}
+   if(path[3]==='remove'){await app.removeStudent(user,path[2],classroomId);return ok();}
+   if(path[3]==='transfer'){await app.transferStudent(user,path[2],transferSchema.parse(await json()).classroomId,classroomId);return ok();}
   }
   if(route==='teacher/questions'&&method==='POST')return NextResponse.json({question:await app.saveQuestion(user,questionSchema.parse(await json()),undefined,classroomId)});
   if(path.length===3&&path[0]==='teacher'&&path[1]==='questions'){

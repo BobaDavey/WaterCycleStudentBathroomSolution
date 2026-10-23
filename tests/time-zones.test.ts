@@ -1,9 +1,10 @@
+import { WorkflowTestApp as WaterCycle } from './student-fixtures';
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '../src/lib/db';
 import { userFrom } from '../src/lib/auth';
-import { WaterCycle, classroomFrom } from '../src/lib/domain';
+import { classroomFrom } from '../src/lib/domain';
 import type { User } from '../src/lib/contracts';
 import { DEFAULT_TIME_ZONE, US_TIME_ZONES, effectiveTimeZone, formatClassTimestamp, classDateKey } from '../src/lib/time-zones';
 import { duration } from '../src/lib/client';
@@ -82,7 +83,7 @@ describe('Persistent class zones and unchanged absolute classroom records',()=>{
    assert.equal(student.activeCount,2);assert.equal(student.waitingCount,1);
    const waiting=await app.studentState(students[3]);assert.equal(waiting.currentVisit?.status,'waiting');assert.equal(waiting.currentVisit.position,1);
    const state=await app.teacherState(teacher,classroom.id);assert.deepEqual(state.stats,initial.stats);
-   assert.equal(state.pendingStudents.find(row=>row.username==='zonepending')?.registeredAt,initial.pendingStudents.find(row=>row.username==='zonepending')?.registeredAt);
+   assert.equal(state.pendingStudents.find(row=>row.username.startsWith('zonepending'))?.registeredAt,initial.pendingStudents.find(row=>row.username.startsWith('zonepending'))?.registeredAt);
    assert.equal(await app.exportCsv(teacher,classroom.id),csv);assert.deepEqual(await records(),original);
   }
  });

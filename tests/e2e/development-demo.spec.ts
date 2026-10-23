@@ -1,4 +1,4 @@
-import { test,expect } from '@playwright/test';
+import { test,expect } from './fixtures';
 import type { TeacherState, StudentState } from '../../src/lib/contracts';
 import { qualifyBreak } from './break-helpers';
 
@@ -13,9 +13,9 @@ test('exact fresh-development teacher and Active student credentials support ros
   }
   const roster=await(await teacher.request.get('/api/teacher/state')).json() as TeacherState;
   const state=await(await student.request.get('/api/student/state')).json() as StudentState;
-  expect(state.user.accountStatus).toBe('active');expect(state.classroom?.code).toBe('DEMO1');
+  expect(state.user.accountStatus).toBe('active');expect(state.enrollments).toHaveLength(2);expect(state.enrollments.every(e=>e.status==='approved')).toBe(true);expect(state.classroom?.code).toBe('DEMO1');
   expect(roster.students.find(s=>s.username==='teststudent')?.id).toBe(state.user.id);
-  await teacher.getByRole('button',{name:'Class Roster',exact:true}).click();await teacher.getByRole('button',{name:'View Class',exact:true}).click();
+  await teacher.getByRole('button',{name:'Class Roster',exact:true}).click();await teacher.getByRole('article').filter({hasText:'DEMO1'}).getByRole('button',{name:'View Class',exact:true}).click();
   await expect(teacher.getByRole('row').filter({hasText:'teststudent'})).toBeVisible();
   await qualifyBreak(student,roster.questions,'water');
   await expect(student.getByRole('button',{name:"I'm Back",exact:true})).toBeVisible();await student.getByRole('button',{name:"I'm Back",exact:true}).click();

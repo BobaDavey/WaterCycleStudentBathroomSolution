@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { Database, SQL } from './db';
 import { AppError, hashPassword, userFrom, usernameFor, verifyPassword } from './auth';
 import { allowedAdministrator, reservedAdministratorUsername } from './bootstrap-admin';
-import type { BreakPurpose, AdminState, AdminStudent, ClassDetail, Classroom, Question, Quiz, QuizResult, RosterStudent, StudentDetail, StudentState, TeacherAccount, TeacherState, User, Visit } from './contracts';
+import type { BreakPurpose, AdminState, AdminStudent, ClassDetail, Classroom, Question, Quiz, QuizResult, RosterStudent, StudentDetail, StudentState, StudentEnrollment, TeacherAccount, TeacherState, User, Visit } from './contracts';
+import { isClassInSession } from './class-schedule';
 import { DEFAULT_TIME_ZONE, effectiveTimeZone } from './time-zones';
 import { defaultQuestions } from './default-questions';
 import { submitProblemReport, listProblemReports, problemReportDetail, updateProblemReport, type ReportInput, type ReportFilters } from './problem-reports';
@@ -17,17 +18,18 @@ const code = z.string().regex(/^[A-Za-z0-9]{5}$/, 'Enrollment codes must contain
 const className = z.string().trim().min(1, 'Please enter a class name.').max(100);
 const period = z.string().trim().max(50).optional();
 const timeZone = z.string().trim().min(1).max(80).refine(value => { try { new Intl.DateTimeFormat('en',{timeZone:value}); return true; } catch { return false; } }, 'Choose a valid IANA timezone, such as America/New_York.');
-export const loginSchema = z.object({ username: z.string().trim().min(1).max(100), password: z.string().min(1).max(128), role: z.enum(['student','teacher','admin']) });
-export const signupSchema = z.object({ firstName: name, lastName: name, username: username.optional(), password, classroomCode: code });
-export const enrollmentSchema = z.object({ classroomCode: code });
+export const loginSchema = z.object({ username: z.string().trim().min(1).max(1024), password: z.string().min(1).max(128), role: z.enum(['student','teacher','admin']) });
+export const signupSchema = z.object({ firstName: name, lastName: name, password });
+export const enrollmentSchema = z.object({ classroomCode: code, classroomId: z.string().min(1).max(200).optional() });
 export const setupSchema = z.object({}).passthrough();
-export const classCreateSchema = z.object({ name: className, period, code, timeZone: timeZone.optional() });
-export const classUpdateSchema = z.object({ name: className.optional(), period: z.union([z.string().trim().max(50), z.null()]).optional(), code: code.optional(), archived: z.boolean().optional(), timeZone: timeZone.optional() }).refine(v => Object.keys(v).length > 0, 'Choose a change.');
+const wallTime = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'Choose a valid class time.');
+export const classCreateSchema = z.object({ name: className, period, code, timeZone: timeZone.optional(), startTime: wallTime, endTime: wallTime }).refine(v=>v.startTime<v.endTime, 'Class end must be after start. Identical and overnight times are not supported.');
+export const classUpdateSchema = z.object({ name: className.optional(), period: z.union([z.string().trim().max(50), z.null()]).optional(), code: code.optional(), archived: z.boolean().optional(), timeZone: timeZone.optional(), startTime: wallTime.optional(), endTime: wallTime.optional() }).refine(v => Object.keys(v).length > 0, 'Choose a change.');
 export const classroomSchema = classUpdateSchema;
 export const questionSchema = z.object({ prompt: z.string().trim().min(8).max(1000), options: z.array(z.string().trim().min(1).max(300)).length(4), correctIndex: z.number().int().min(0).max(3), topic: z.string().trim().min(1).max(80), explanation: z.string().trim().max(2000).default(''), active: z.boolean().default(true) }).refine(q => new Set(q.options.map(s => s.toLowerCase())).size === 4, { message: 'Each answer option must be different.' });
 export const rosterSchema = z.object({ firstName: name, lastName: name });
 export const rosterUpdateSchema = z.object({ enabled: z.boolean().optional(), accountStatus: z.enum(['active','deactivated']).optional(), password: password.optional() }).refine(v => v.enabled !== undefined || v.accountStatus !== undefined || v.password !== undefined, 'Choose a change.');
-export const transferSchema = z.object({ classroomId: z.string().uuid() });
+export const transferSchema = z.object({ classroomId: z.string().min(1).max(200) });
 export const passwordSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: password });
 export const submitSchema = z.object({ quizId: z.string().uuid(), answers: z.array(z.number().int().min(0).max(3)).length(2) });
 export const teacherCreateSchema = z.object({ firstName: name, lastName: name, username, email, password, enabled: z.boolean().default(true) });
@@ -37,10 +39,10 @@ export const adminProfileSchema = z.object({ firstName: name, lastName: name, em
 type Row = Record<string, unknown>;
 function iso(value: unknown): string | null { return value ? new Date(value as string | Date).toISOString() : null; }
 function nullable(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
-export function classroomFrom(row: Row): Classroom { return { id: String(row.id), teacherId: String(row.teacher_id), teacherName: `${row.teacher_first_name ?? ''} ${row.teacher_last_name ?? ''}`.trim() || undefined, name: String(row.name), period: nullable(row.period), code: nullable(row.code), timeZone: effectiveTimeZone(row.time_zone as string | null), legacyCode: nullable(row.legacy_code), capacity: Number(row.capacity), archived: Boolean(row.archived), studentCount: Number(row.student_count || 0) }; }
+export function classroomFrom(row: Row): Classroom { return { id: String(row.id), teacherId: String(row.teacher_id), teacherName: `${row.teacher_first_name ?? ''} ${row.teacher_last_name ?? ''}`.trim() || undefined, name: String(row.name), period: nullable(row.period), code: nullable(row.code), timeZone: effectiveTimeZone(row.time_zone as string | null), legacyCode: nullable(row.legacy_code), capacity: Number(row.capacity), startTime: nullable(row.start_time), endTime: nullable(row.end_time), scheduleDays: (row.schedule_days ?? [1,2,3,4,5]) as number[], archived: Boolean(row.archived), studentCount: Number(row.student_count || 0) }; }
 function questionFrom(row: Row): Question { return { id: String(row.id), prompt: String(row.prompt), options: row.options as string[], correctIndex: Number(row.correct_index), topic: String(row.topic), explanation: String(row.explanation), active: Boolean(row.active) }; }
-function visitFrom(row: Row): Visit { return { id: String(row.id), studentId: String(row.student_id), studentName: `${row.first_name} ${row.last_name}`, classroomId: String(row.classroom_id), classroomName: String(row.classroom_name ?? ''), timeZone: effectiveTimeZone(row.classroom_time_zone as string | null), status: row.status as Visit['status'], purpose: (row.purpose ?? null) as BreakPurpose | null, requestedAt: iso(row.requested_at)!, readyAt: iso(row.ready_at), readyExpiresAt: iso(row.ready_expires_at), reservationPaused: Boolean(row.capacity_paused), leftAt: iso(row.left_at), returnedAt: iso(row.returned_at), warningAcknowledgedAt: iso(row.warning_acknowledged_at), corrections: (row.corrections ?? []) as Visit['corrections'] }; }
-function rosterFrom(row: Row): RosterStudent { return { id: String(row.id), firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), enabled: Boolean(row.enabled), accountStatus: row.account_status as RosterStudent['accountStatus'], registeredAt: iso(row.registered_at ?? row.created_at)!, approvedAt: iso(row.approved_at), registered: Boolean(row.password_hash), mustChangePassword: Boolean(row.must_change_password), visitsToday: Number(row.visits_today || 0), classroomId: nullable(row.current_classroom_id ?? row.classroom_id) }; }
+function visitFrom(row: Row): Visit { return { id: String(row.id), studentId: String(row.student_id), studentName: `${row.first_name} ${row.last_name}`, studentUsername: String(row.username??''), classroomId: String(row.classroom_id), classroomName: String(row.classroom_name ?? ''), timeZone: effectiveTimeZone(row.classroom_time_zone as string | null), status: row.status as Visit['status'], cancellationReason: nullable(row.cancellation_reason), purpose: (row.purpose ?? null) as BreakPurpose | null, requestedAt: iso(row.requested_at)!, readyAt: iso(row.ready_at), readyExpiresAt: iso(row.ready_expires_at), reservationPaused: Boolean(row.capacity_paused), leftAt: iso(row.left_at), returnedAt: iso(row.returned_at), warningAcknowledgedAt: iso(row.warning_acknowledged_at), corrections: (row.corrections ?? []) as Visit['corrections'] }; }
+function rosterFrom(row: Row): RosterStudent { return { enrollmentId: String(row.enrollment_id ?? ''), accountSuspended: Boolean(row.account_suspended), enrollmentStatus: (row.enrollment_status ?? 'pending') as RosterStudent['enrollmentStatus'], id: String(row.id), firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), enabled: Boolean(row.enabled), accountStatus: row.enrollment_status === 'approved' ? 'active' : (row.enrollment_status ?? row.account_status) as RosterStudent['accountStatus'], registeredAt: iso(row.registered_at ?? row.created_at)!, approvedAt: iso(row.enrollment_approved_at), registered: Boolean(row.password_hash), mustChangePassword: Boolean(row.must_change_password), visitsToday: Number(row.visits_today || 0), classroomId: nullable(row.current_classroom_id ?? row.classroom_id) }; }
 function teacherFrom(row: Row): TeacherAccount { return { id: String(row.id), firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), email: nullable(row.email), enabled: Boolean(row.enabled), mustChangePassword: Boolean(row.must_change_password), classCount: Number(row.class_count || 0), studentCount: Number(row.student_count || 0), createdAt: iso(row.created_at)! }; }
 function assertRole(user: User, role: User['role']) { if (user.role !== role) throw new AppError(403, role === 'admin' ? 'Administrator access required.' : role === 'teacher' ? 'Teacher access required.' : 'This action is for students.'); }
 export function requirePasswordChange(user: User) { if (user.mustChangePassword) throw new AppError(403, 'Please change your temporary password before continuing.'); }
@@ -52,25 +54,32 @@ async function currentActor(tx: SQL, user: User, role: User['role'], changing = 
  return row;
 }
 async function lockClasses(tx: SQL, ids: (string | null | undefined)[]) { for (const id of [...new Set(ids.filter((id): id is string => Boolean(id)))].sort()) await tx.query('SELECT id FROM classrooms WHERE id=$1 FOR UPDATE',[id]); }
-async function checkStudentAccess(tx: SQL, user: User, classroomId: string, allowInactive = false) {
- const { rows: [current] } = await tx.query(`SELECT u.*,c.archived,t.enabled AS teacher_enabled FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE JOIN classrooms c ON c.id=e.classroom_id JOIN users t ON t.id=c.teacher_id WHERE u.id=$1 AND u.role='student' AND u.classroom_id=$2 AND e.classroom_id=$2 FOR UPDATE OF u`, [user.id,classroomId]);
- if (!current) throw new AppError(409,'Your enrollment changed or your account is unavailable. Refresh and contact your teacher if needed.');
- if (current.must_change_password) throw new AppError(403,'Please change your temporary password before continuing.');
- if (!allowInactive && current.account_status!=='active') throw new AppError(403,current.account_status==='pending'?'Your account is awaiting teacher approval.':'Your account is currently deactivated. Please contact your teacher.');
- if (!allowInactive && (current.archived || !current.teacher_enabled)) throw new AppError(409,'This class is inactive. You can view your records, but new passes are unavailable.');
+async function serverClock(tx: SQL, override?: Date): Promise<Date> {
+ if(override)return override;
+ const {rows:[row]}=await tx.query('SELECT statement_timestamp() AS now');return new Date(row.now as string);
+}
+async function checkStudentAccess(tx: SQL, user: User, classroomId: string, allowInactive = false, now?: Date) {
+ const current=await currentActor(tx,user,'student',true,true);
+ if(allowInactive)return current; // Returns remain possible after session/enrollment changes.
+ if(current.account_suspended)throw new AppError(403,'Your account is currently deactivated. Please contact your school administrator.');
+ const {rows:[membership]}=await tx.query(`SELECT c.*,e.status,t.enabled AS teacher_enabled FROM enrollments e JOIN classrooms c ON c.id=e.classroom_id JOIN users t ON t.id=c.teacher_id WHERE e.student_id=$1 AND e.classroom_id=$2 AND e.active=TRUE FOR SHARE OF t`,[user.id,classroomId]);
+ if(!membership)throw new AppError(403,'You are not enrolled in this class. Join it from My Classes first.');
+ if(membership.status!=='approved')throw new AppError(403,membership.status==='pending'?'Your enrollment is awaiting teacher approval.':'Your enrollment is deactivated. Please contact this class’s teacher.');
+ if(membership.archived||!membership.teacher_enabled)throw new AppError(409,'This class is inactive. Your records are preserved.');
+ if(!isClassInSession(classroomFrom(membership),await serverClock(tx,now)))throw new AppError(409,'Class Not in Session. New breaks are only available during the scheduled Monday–Friday session. Ask your teacher to configure missing class times.');
  return current;
 }
 // Every caller holds the classroom row lock, so reservations and available spots
 // have a single ordering even when different students poll or answer together.
-async function promote(tx: SQL, classroomId: string) {
- const { rows: [classroom] } = await tx.query('SELECT c.archived,c.capacity,t.enabled AS teacher_enabled FROM classrooms c JOIN users t ON t.id=c.teacher_id WHERE c.id=$1',[classroomId]);
+async function promote(tx: SQL, classroomId: string, now?: Date) {
+ const { rows: [classroom] } = await tx.query('SELECT c.*,t.enabled AS teacher_enabled FROM classrooms c JOIN users t ON t.id=c.teacher_id WHERE c.id=$1',[classroomId]);
  if (!classroom) return;
  await tx.query(`UPDATE visits v SET status='cancelled' WHERE v.classroom_id=$1 AND v.status IN ('waiting','ready') AND (
   (v.status='ready' AND v.capacity_paused=FALSE AND (v.ready_expires_at IS NULL OR v.ready_expires_at<=statement_timestamp())) OR
-  NOT EXISTS(SELECT 1 FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE WHERE u.id=v.student_id AND u.enabled=TRUE AND u.account_status='active' AND u.must_change_password=FALSE AND u.classroom_id=$1 AND e.classroom_id=$1)
+  NOT EXISTS(SELECT 1 FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE WHERE u.id=v.student_id AND u.account_suspended=FALSE AND u.must_change_password=FALSE AND e.status='approved' AND e.classroom_id=$1)
  )`,[classroomId]);
- if (classroom.archived || !classroom.teacher_enabled) {
-  await tx.query("UPDATE visits SET status='cancelled' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[classroomId]);
+ if (classroom.archived || !classroom.teacher_enabled || !isClassInSession(classroomFrom(classroom),await serverClock(tx,now))) {
+  await tx.query("UPDATE visits SET status='cancelled',cancellation_reason='This class session ended or became inactive. Your waiting request was cancelled; active break timers continue.' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[classroomId]);
   return;
  }
  // A correction can fill actual outside capacity while earlier reservations
@@ -92,68 +101,72 @@ function quizFrom(row: Row): Quiz {
  const questions=row.questions as Question[];
  const question=questions[Number(row.current_index)];
  if(!question || !row.question_token || !row.purpose)throw new AppError(409,'This learning session is unavailable. Please start a new request.');
- return {id:String(row.id),purpose:row.purpose as BreakPurpose,correctCount:Number(row.correct_count),question:{id:question.id,prompt:question.prompt,options:question.options,topic:question.topic},questionToken:String(row.question_token),expiresAt:iso(row.expires_at)!,...((row.answer_history as AnswerRecord[]).length>=questions.length?{notice:'You have worked through the question bank. Questions may repeat as you work toward two correct answers.'}:{})};
+ return {classroomId:String(row.classroom_id),id:String(row.id),purpose:row.purpose as BreakPurpose,correctCount:Number(row.correct_count),question:{id:question.id,prompt:question.prompt,options:question.options,topic:question.topic},questionToken:String(row.question_token),expiresAt:iso(row.expires_at)!,...((row.answer_history as AnswerRecord[]).length>=questions.length?{notice:'You have worked through the question bank. Questions may repeat as you work toward two correct answers.'}:{})};
 }
-async function finishStudentVisits(tx: SQL, studentId: string) {
- await tx.query("UPDATE visits SET status=CASE WHEN status='out' THEN 'returned' ELSE 'cancelled' END,returned_at=CASE WHEN status='out' THEN statement_timestamp() ELSE returned_at END WHERE student_id=$1 AND status IN ('waiting','ready','out')",[studentId]);
- await tx.query('UPDATE quizzes SET used=TRUE WHERE student_id=$1 AND used=FALSE',[studentId]);
+async function attachEnrollment(tx: SQL, studentId: string, classroomId: string, status = 'pending') {
+ await tx.query(`INSERT INTO enrollments(id,student_id,classroom_id,active,status) VALUES($1,$2,$3,TRUE,$4)
+ ON CONFLICT(student_id,classroom_id) DO UPDATE SET active=TRUE,status=$4,joined_at=statement_timestamp(),left_at=NULL,approved_at=NULL,approved_by=NULL WHERE enrollments.active=FALSE`,[randomUUID(),studentId,classroomId,status]);
+ // Legacy pointer is a convenience/default only, never an authorization source.
+ await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2 AND classroom_id IS NULL',[classroomId,studentId]);
 }
-async function attachEnrollment(tx: SQL, studentId: string, classroomId: string) {
- await tx.query(`INSERT INTO enrollments(id,student_id,classroom_id,active,joined_at,left_at) VALUES($1,$2,$3,TRUE,CURRENT_TIMESTAMP,NULL) ON CONFLICT(student_id,classroom_id) DO UPDATE SET active=TRUE,joined_at=CURRENT_TIMESTAMP,left_at=NULL`,[randomUUID(),studentId,classroomId]);
- await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2',[classroomId,studentId]);
+async function allocatedUsername(tx: SQL, first: string, last: string): Promise<string> {
+ const base=usernameFor(first,last)||'student';
+ // Reserve numbers atomically. The high-water mark survives renames/deletions.
+ const {rows:[existing]}=await tx.query<{n:string}>(`SELECT COALESCE(MAX(substring(username FROM length($1::text)+1)::bigint),0)+1 AS n FROM users WHERE left(username,length($1::text))=$1 AND substring(username FROM length($1::text)+1) ~ '^[0-9]{2,12}$'`,[base]);
+ const {rows:[counter]}=await tx.query<{n:string}>(`INSERT INTO student_username_counters(base,next_number) VALUES($1,$2::bigint+1)
+ ON CONFLICT(base) DO UPDATE SET next_number=GREATEST(student_username_counters.next_number,$2::bigint)+1 RETURNING (next_number-1)::text AS n`,[base,existing.n]);
+ return base+counter.n.padStart(2,'0');
 }
 const classSelect = `SELECT c.*,t.first_name AS teacher_first_name,t.last_name AS teacher_last_name,t.enabled AS teacher_enabled,(SELECT COUNT(*) FROM enrollments e WHERE e.classroom_id=c.id AND e.active=TRUE) AS student_count FROM classrooms c JOIN users t ON t.id=c.teacher_id`;
-const visitSelect = `SELECT v.*,u.first_name,u.last_name,c.name AS classroom_name,c.time_zone AS classroom_time_zone,
+const visitSelect = `SELECT v.*,u.first_name,u.last_name,u.username,c.name AS classroom_name,c.time_zone AS classroom_time_zone,
  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',bc.id,'teacherName',a.first_name||' '||a.last_name,'correctedAt',bc.corrected_at,'incorrectReturnedAt',bc.incorrect_returned_at,'reason',bc.reason) ORDER BY bc.corrected_at,bc.id) FROM break_corrections bc JOIN users a ON a.id=bc.teacher_id WHERE bc.visit_id=v.id),'[]'::jsonb) AS corrections
  FROM visits v JOIN users u ON u.id=v.student_id JOIN classrooms c ON c.id=v.classroom_id`;
-const rosterSelect = `SELECT u.*,e.classroom_id AS current_classroom_id,(SELECT COUNT(*) FROM visits v WHERE v.student_id=u.id AND v.classroom_id=e.classroom_id AND v.left_at>=DATE_TRUNC('day',CURRENT_TIMESTAMP)) AS visits_today FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE`;
-const teacherSelect = `SELECT u.*,(SELECT COUNT(*) FROM classrooms c WHERE c.teacher_id=u.id) AS class_count,(SELECT COUNT(*) FROM enrollments e JOIN classrooms c ON c.id=e.classroom_id WHERE c.teacher_id=u.id AND e.active=TRUE) AS student_count FROM users u`;
+const rosterSelect = `SELECT u.*,e.id AS enrollment_id,e.status AS enrollment_status,e.approved_at AS enrollment_approved_at,e.classroom_id AS current_classroom_id,(SELECT COUNT(*) FROM visits v WHERE v.student_id=u.id AND v.classroom_id=e.classroom_id AND v.left_at>=DATE_TRUNC('day',CURRENT_TIMESTAMP)) AS visits_today FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE`;
+const teacherSelect = `SELECT u.*,(SELECT COUNT(*) FROM classrooms c WHERE c.teacher_id=u.id) AS class_count,(SELECT COUNT(DISTINCT e.student_id) FROM enrollments e JOIN classrooms c ON c.id=e.classroom_id WHERE c.teacher_id=u.id AND e.active=TRUE) AS student_count FROM users u`;
 const emptyStats = {out:0,ready:0,waiting:0,tripsToday:0,averageMinutes:0};
 
 export class WaterCycle {
- constructor(readonly db: Database) {}
+ constructor(readonly db: Database, private readonly clock?: () => Date) {}
+ private promote(tx: SQL, id: string) { return promote(tx,id,this.clock?.()); }
  async login(input: z.infer<typeof loginSchema>, connection: SQL = this.db): Promise<User> {
   const { rows: [row] } = await connection.query('SELECT * FROM users WHERE username=$1 AND role=$2 FOR UPDATE', [input.username.toLowerCase(), input.role]);
   if (!row && this.db.localDevelopment && process.env.NODE_ENV!=='production' && ['teachertest','teststudent'].includes(input.username.toLowerCase())) console.warn('Local demo account not initialized. Stop the server and run npm run dev:setup. Existing account passwords are never reset.');
   if (!await verifyPassword(input.password, row?.password_hash as string | null) || (!row?.enabled && row?.role!=='student') || (input.role === 'admin' && !allowedAdministrator(connection,row.username))) throw new AppError(401, 'The username or password is incorrect.');
-  if (this.db.localDevelopment && process.env.NODE_ENV !== 'production' && row.role==='student' && row.account_status!=='active') console.info(`Local student sign-in: account status is ${row.account_status}. Teacher approval or reactivation is required before requesting a break.`);
+  if (this.db.localDevelopment && process.env.NODE_ENV !== 'production' && row.role==='student' && row.account_suspended) console.info('Local student sign-in: account-wide suspension is active. Contact the administrator; class enrollment permissions remain separate.');
   return userFrom(row);
  }
  async setup(_input?: unknown): Promise<User> { throw new AppError(410,'Teacher accounts are created by the administrator. Public teacher registration is unavailable.'); }
  async seedQuestions(tx: SQL, classroomId: string) { for (const q of defaultQuestions) await tx.query('INSERT INTO questions(id,classroom_id,prompt,options,correct_index,topic,explanation,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[randomUUID(),classroomId,q.prompt,JSON.stringify(q.options),q.correctIndex,q.topic,q.explanation,q.active]); }
  async signup(input: z.infer<typeof signupSchema>): Promise<User> {
-  const classroomCode=normalizedCode(input.classroomCode);
-  const login = input.username || usernameFor(input.firstName,input.lastName);
-  if (login.length < 2 || reservedAdministratorUsername(login)) throw new AppError(400,'Choose a valid student username.');
-  const hash = await hashPassword(input.password);
-  return this.db.transaction(async tx => {
-   const { rows: [classroom] } = await tx.query(`SELECT c.* FROM classrooms c JOIN users t ON t.id=c.teacher_id WHERE c.code=$1 AND c.archived=FALSE AND t.enabled=TRUE FOR UPDATE OF c`,[classroomCode]);
-   if (!classroom) throw new AppError(400,'That enrollment code is invalid or belongs to an inactive class. Check the five-character code with your teacher.');
-   const { rows: [existing] } = await tx.query('SELECT * FROM users WHERE username=$1 FOR UPDATE',[login]);
-   if (existing) {
-    const {rows:enrolled}=await tx.query('SELECT classroom_id FROM enrollments WHERE student_id=$1 AND active=TRUE',[existing.id]);
-    if (existing.role !== 'student' || existing.password_hash || !existing.enabled || enrolled[0]?.classroom_id !== classroom.id) throw new AppError(409,'This username is already registered or unavailable. Sign in to your existing account or ask your teacher for help.');
-    const {rows:[claimed]}=await tx.query("UPDATE users SET password_hash=$1,first_name=$2,last_name=$3,tutorial_completed=FALSE,account_status='pending',registered_at=statement_timestamp(),approved_at=NULL,approved_by=NULL WHERE id=$4 RETURNING *",[hash,input.firstName,input.lastName,existing.id]);
-    return userFrom(claimed);
+  input=signupSchema.parse(input);
+  const hash=await hashPassword(input.password);
+  return this.db.transaction(async tx=>{
+   for(let retry=0;retry<100;retry++){
+    const login=await allocatedUsername(tx,input.firstName,input.lastName);
+    const {rows:[student]}=await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,tutorial_completed,account_status) VALUES($1,'student',$2,$3,$4,$5,FALSE,'active') ON CONFLICT(username) DO NOTHING RETURNING *`,[randomUUID(),input.firstName,input.lastName,login,hash]);
+    if(student)return userFrom(student);
    }
-   const id=randomUUID();
-   const {rows:[student]}=await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,tutorial_completed) VALUES($1,'student',$2,$3,$4,$5,$6,FALSE) RETURNING *`,[id,input.firstName,input.lastName,login,hash,classroom.id]);
-   await attachEnrollment(tx,id,String(classroom.id));
-   return userFrom(student);
+   throw new AppError(409,'Could not assign a username. Please try again.');
   });
  }
- async enrollStudent(user: User, classroomCode: string) {
+ async previewEnrollment(user:User,classroomCode:string):Promise<Classroom> {
+  await currentActor(this.db,user,'student',true);
+  const {rows:[classroom]}=await this.db.query(`${classSelect} WHERE c.code=$1 AND c.archived=FALSE AND t.enabled=TRUE`,[normalizedCode(classroomCode)]);
+  if(!classroom)throw new AppError(400,'That enrollment code is invalid or belongs to an inactive class. Check the five-character code with your teacher.');
+  return classroomFrom(classroom);
+ }
+ async enrollStudent(user: User, classroomCode: string, expectedClassroomId?: string) {
   classroomCode=normalizedCode(classroomCode);
-  assertRole(user,'student'); requirePasswordChange(user);
-  await this.db.transaction(async tx=>{
+  assertRole(user,'student');requirePasswordChange(user);
+  return this.db.transaction(async tx=>{
    const {rows:[classroom]}=await tx.query(`SELECT c.* FROM classrooms c JOIN users t ON t.id=c.teacher_id WHERE c.code=$1 AND c.archived=FALSE AND t.enabled=TRUE FOR UPDATE OF c`,[classroomCode]);
-   if (!classroom) throw new AppError(400,'That enrollment code is invalid or belongs to an inactive class. Check with your teacher.');
-   await currentActor(tx,user,'student',true);
-   await tx.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[user.id]);
-   const {rows}=await tx.query('SELECT classroom_id FROM enrollments WHERE student_id=$1 AND active=TRUE',[user.id]);
-   if (rows.length) throw new AppError(409,'You are already enrolled. Ask your teacher to transfer you to another class.');
+   if(!classroom)throw new AppError(400,'That enrollment code is invalid or belongs to an inactive class. Check with your teacher.');
+   if(expectedClassroomId&&expectedClassroomId!==classroom.id)throw new AppError(409,'That class code changed. Find the class again and confirm its current teacher.');
+   const current=await currentActor(tx,user,'student',true,true);
+   if(current.account_suspended)throw new AppError(403,'Your account is currently deactivated. Please contact your school administrator.');
+   const {rows:[existing]}=await tx.query('SELECT id,active FROM enrollments WHERE student_id=$1 AND classroom_id=$2',[user.id,classroom.id]);
+   if(existing?.active)throw new AppError(409,'You have already joined this class. Its teacher manages your approval status.');
    await attachEnrollment(tx,user.id,String(classroom.id));
-   await tx.query("UPDATE users SET account_status='pending',enabled=TRUE,approved_at=NULL,approved_by=NULL,registered_at=statement_timestamp() WHERE id=$1",[user.id]);
   });
  }
  async changePassword(user: User, currentPassword: string, newPassword: string) {
@@ -166,56 +179,57 @@ export class WaterCycle {
   });
  }
  private async maintainQueue(classroomId: string) {
-  await this.db.transaction(async tx=>{await lockClasses(tx,[classroomId]);await promote(tx,classroomId);});
- }
- private async studentClassId(user: User): Promise<string> {
-  const {rows:[enrollment]}=await this.db.query('SELECT e.classroom_id FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.student_id=$1 AND e.active=TRUE AND u.classroom_id=e.classroom_id',[user.id]);
-  if(!enrollment)throw new AppError(409,'Join a class before requesting a break.');
-  return String(enrollment.classroom_id);
+  await this.db.transaction(async tx=>{await lockClasses(tx,[classroomId]);await this.promote(tx,classroomId);});
  }
  async studentState(user: User): Promise<StudentState> {
   assertRole(user,'student');
-  for(let retry=0;retry<3;retry++) {
-   const {rows:[discovered]}=await this.db.query('SELECT e.classroom_id FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.student_id=$1 AND e.active=TRUE AND u.classroom_id=e.classroom_id',[user.id]);
-   const classroomId=nullable(discovered?.classroom_id);
-   const snapshot=await this.db.transaction(async tx=>{
-    // Mutations lock classrooms before students. Recheck enrollment after both
-    // locks rather than acquiring a different class lock while holding a user.
-    await lockClasses(tx,[classroomId]);
-    const freshUser=userFrom(await currentActor(tx,user,'student',false,true));
-    const {rows:[membership]}=await tx.query('SELECT classroom_id FROM enrollments WHERE student_id=$1 AND active=TRUE',[user.id]);
-    if(nullable(membership?.classroom_id)!==classroomId || freshUser.classroomId!==classroomId)return null;
-    const {rows:[enrollment]}=await tx.query(`${classSelect} JOIN enrollments e ON e.classroom_id=c.id AND e.student_id=$1 AND e.active=TRUE FOR SHARE OF t`,[user.id]);
-    const classroom=enrollment?classroomFrom(enrollment):null;
-    if(classroom)await promote(tx,classroom.id);
-    const [{rows:visits},{rows:[counts]},{rows:[questions]},{rows:[attempt]},{rows:[clock]}]=await Promise.all([
-     tx.query(`${visitSelect} WHERE v.student_id=$1 AND (v.status IN ('waiting','ready','out') OR v.id IN (SELECT id FROM visits WHERE student_id=$1 AND status IN ('returned','cancelled') ORDER BY requested_at DESC,id DESC LIMIT 10)) ORDER BY v.requested_at DESC,v.id DESC`,[user.id]),
-     tx.query("SELECT COUNT(*) FILTER(WHERE status IN ('ready','out')) AS active,COUNT(*) FILTER(WHERE status='waiting') AS waiting FROM visits WHERE classroom_id=$1",[classroomId]),
-     tx.query('SELECT COUNT(*) AS n FROM questions WHERE classroom_id=$1 AND active=TRUE AND deleted=FALSE',[classroomId]),
-     tx.query('SELECT * FROM quizzes WHERE student_id=$1 AND classroom_id=$2 AND used=FALSE AND expires_at>statement_timestamp() AND purpose IS NOT NULL ORDER BY expires_at DESC,id DESC LIMIT 1',[user.id,classroomId]),
-     tx.query('SELECT statement_timestamp() AS now')
-    ]);
-    const currentRow=visits.find(row=>['waiting','ready','out'].includes(String(row.status)));
-    const currentVisit=currentRow?visitFrom(currentRow):null;
-    if(currentVisit?.status==='waiting') {const {rows:waiting}=await tx.query("SELECT id FROM visits WHERE classroom_id=$1 AND status='waiting' ORDER BY requested_at,id",[classroomId]);const position=waiting.findIndex(row=>row.id===currentVisit.id);if(position<0)throw new AppError(409,'Your request changed while loading. Please refresh.');currentVisit.position=position+1;}
-    const canRequestPass=Boolean(freshUser.accountStatus==='active' && classroom && !classroom.archived && enrollment.teacher_enabled && !freshUser.mustChangePassword);
-    const unavailableReason=freshUser.accountStatus==='pending'?'Your account is awaiting teacher approval.':freshUser.accountStatus==='deactivated'?'Your account is currently deactivated. Please contact your teacher.':!classroom?'You are not currently enrolled. Enter a class code below or ask your teacher to add you.':classroom.archived?'This class has been archived. Your records are preserved; contact your teacher about a new class.':!enrollment.teacher_enabled?'Your teacher’s account is inactive. New passes are temporarily unavailable.':Number(questions.n)<2?'Your teacher needs to add at least two active questions before passes are available.':undefined;
-    return {user:{...freshUser,classroomId},classroom,currentVisit,activeQuiz:attempt&&canRequestPass&&!currentVisit?quizFrom(attempt):null,serverNow:iso(clock.now)!,activeCount:Number(counts.active),waitingCount:Number(counts.waiting),recentVisits:visits.filter(visit=>['returned','cancelled'].includes(String(visit.status))).slice(0,10).map(visitFrom),availableQuestions:Number(questions.n),canRequestPass,unavailableReason};
+  for(let retry=0;retry<3;retry++){
+   const discover=async(connection:SQL)=>(await connection.query<{classroom_id:string}>(`SELECT classroom_id FROM enrollments WHERE student_id=$1 AND active=TRUE UNION SELECT classroom_id FROM visits WHERE student_id=$1 AND status IN ('waiting','ready','out') UNION SELECT classroom_id FROM quizzes WHERE student_id=$1 AND used=FALSE`,[user.id])).rows.map(row=>row.classroom_id).sort();
+   const ids=await discover(this.db);
+   const state=await this.db.transaction(async tx=>{
+    await lockClasses(tx,ids);const freshUser=userFrom(await currentActor(tx,user,'student',false,true));
+    if(JSON.stringify(ids)!==JSON.stringify(await discover(tx)))return null;
+    const now=await serverClock(tx);
+    const {rows:memberships}=await tx.query(`${classSelect} JOIN enrollments e ON e.classroom_id=c.id AND e.student_id=$1 AND e.active=TRUE ORDER BY c.name,c.id`,[user.id]);
+    const {rows:permissions}=await tx.query('SELECT * FROM enrollments WHERE student_id=$1 AND active=TRUE',[user.id]);
+    const enrollments:StudentEnrollment[]=[];
+    for(const row of memberships){
+     const classroom=classroomFrom(row),permission=permissions.find(e=>e.classroom_id===classroom.id)!;
+     const inSession=isClassInSession(classroom,this.clock?.()??now);
+     const unavailableReason=freshUser.accountStatus==='deactivated'?'Your account is currently deactivated. Contact your school administrator.':freshUser.mustChangePassword?'Please change your temporary password.':permission.status==='pending'?'Waiting for Teacher Approval.':permission.status==='deactivated'?'This enrollment is deactivated. Contact this class’s teacher.':classroom.archived||!row.teacher_enabled?'This class is inactive.':!classroom.startTime?'Your teacher needs to configure this class schedule.':!inSession?'Class Not in Session':undefined;
+     enrollments.push({id:String(permission.id),classroom,status:permission.status as StudentEnrollment['status'],joinedAt:iso(permission.joined_at)!,approvedAt:iso(permission.approved_at),inSession,eligible:!unavailableReason,unavailableReason});
+    }
+    for(const id of ids)await this.promote(tx,id);
+    const {rows:visits}=await tx.query(`${visitSelect} WHERE v.student_id=$1 AND (v.status IN ('waiting','ready','out') OR v.id IN (SELECT id FROM visits WHERE student_id=$1 AND status IN ('returned','cancelled') ORDER BY requested_at DESC,id DESC LIMIT 10)) ORDER BY v.requested_at DESC,v.id DESC`,[user.id]);
+    const currentRow=visits.find(row=>['waiting','ready','out'].includes(String(row.status))),currentVisit=currentRow?visitFrom(currentRow):null;
+    const {rows:[attempt]}=await tx.query('SELECT * FROM quizzes WHERE student_id=$1 AND used=FALSE AND expires_at>statement_timestamp() ORDER BY expires_at DESC,id DESC LIMIT 1',[user.id]);
+    const eligible=enrollments.filter(e=>e.eligible);
+    const focus=enrollments.find(e=>e.classroom.id===currentVisit?.classroomId)||enrollments.find(e=>e.classroom.id===attempt?.classroom_id)||eligible[0]||enrollments[0];
+    const classroom=focus?.classroom??null;
+    const {rows:[counts]}=await tx.query("SELECT COUNT(*) FILTER(WHERE status IN ('ready','out')) AS active,COUNT(*) FILTER(WHERE status='waiting') AS waiting FROM visits WHERE classroom_id=$1",[classroom?.id??null]);
+    const {rows:[questions]}=await tx.query('SELECT COUNT(*) AS n FROM questions WHERE classroom_id=$1 AND active=TRUE AND deleted=FALSE',[classroom?.id??null]);
+    if(currentVisit?.status==='waiting'){const {rows:waiting}=await tx.query("SELECT id FROM visits WHERE classroom_id=$1 AND status='waiting' ORDER BY requested_at,id",[currentVisit.classroomId]);currentVisit.position=waiting.findIndex(v=>v.id===currentVisit.id)+1;}
+    const canRequestPass=eligible.length>0;
+    const activeQuiz=attempt&&enrollments.find(e=>e.classroom.id===attempt.classroom_id)?.eligible&&!currentVisit?quizFrom(attempt):null;
+    if(attempt&&!activeQuiz&&!currentVisit)await tx.query('UPDATE quizzes SET used=TRUE WHERE id=$1',[attempt.id]);
+    return{user:freshUser,enrollments,eligibleClassroomIds:eligible.map(e=>e.classroom.id),classroom,currentVisit,activeQuiz,serverNow:now.toISOString(),activeCount:Number(counts.active),waitingCount:Number(counts.waiting),recentVisits:visits.filter(v=>['returned','cancelled'].includes(String(v.status))).slice(0,10).map(visitFrom),availableQuestions:Number(questions.n),canRequestPass,unavailableReason:!canRequestPass?'You can only request a break during a class you are approved to attend. Please check your class schedule or enrollment status.':undefined};
    });
-   if(snapshot)return snapshot;
+   if(state)return state;
   }
-  throw new AppError(409,'Your enrollment changed while loading. Please refresh to see your current class.');
+  throw new AppError(409,'Your enrollments changed while loading. Please refresh.');
  }
- async newQuiz(user: User, purpose: BreakPurpose): Promise<Quiz> {
+ async newQuiz(user: User, purpose: BreakPurpose, requestedClassroomId?: string): Promise<Quiz> {
   assertRole(user,'student');requirePasswordChange(user);
   if(purpose!=='restroom'&&purpose!=='water')throw new AppError(400,'Choose Use Restroom or Drink Water before starting the questions.');
-  const classroomId=await this.studentClassId(user);
+  let classroomId=requestedClassroomId;
+  if(!classroomId){const state=await this.studentState(user);if(state.eligibleClassroomIds.length!==1)throw new AppError(!state.eligibleClassroomIds.length&&state.enrollments.length&&!state.enrollments.some(e=>e.status==='approved')?403:409,state.eligibleClassroomIds.length?'Choose which class you are attending.':'No Eligible Class in Session. You can only request a break during an approved class session; pending enrollments need teacher approval and deactivated enrollments cannot request breaks.');classroomId=state.eligibleClassroomIds[0];}
   return this.db.transaction(async tx=>{
-   await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId);
-   await promote(tx,classroomId);
+   await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId,false,this.clock?.());
+   await this.promote(tx,classroomId);
    const {rows:active}=await tx.query("SELECT id FROM visits WHERE student_id=$1 AND status IN ('waiting','ready','out')",[user.id]);
    if(active.length)throw new AppError(409,'You already have a break or a place in line.');
-   const {rows:[existing]}=await tx.query('SELECT * FROM quizzes WHERE student_id=$1 AND classroom_id=$2 AND used=FALSE AND expires_at>statement_timestamp() ORDER BY expires_at DESC,id DESC LIMIT 1 FOR UPDATE',[user.id,classroomId]);
+   const {rows:[existing]}=await tx.query('SELECT * FROM quizzes WHERE student_id=$1 AND used=FALSE AND expires_at>statement_timestamp() ORDER BY expires_at DESC,id DESC LIMIT 1 FOR UPDATE',[user.id]);
+   if(existing&&existing.classroom_id!==classroomId)throw new AppError(409,'Finish or cancel your learning check in the other class first.');
    if(existing){if(existing.purpose!==purpose)throw new AppError(409,'You already started a request for another purpose. Cancel that learning session before choosing a different purpose.');return quizFrom(existing);}
    const {rows}=await tx.query('SELECT * FROM questions WHERE classroom_id=$1 AND active=TRUE AND deleted=FALSE ORDER BY RANDOM()',[classroomId]);
    if(rows.length<2)throw new AppError(409,'Your teacher needs to add at least two active questions before passes are available.');
@@ -231,7 +245,7 @@ export class WaterCycle {
   if(!previous?.classroom_id)throw new AppError(409,'This learning session is unavailable. Start a fresh request.');
   const classroomId=String(previous.classroom_id);
   return this.db.transaction(async tx=>{
-   await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId);
+   await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId,false,this.clock?.());
    const {rows:[quiz]}=await tx.query('SELECT *,expires_at>statement_timestamp() AS unexpired FROM quizzes WHERE id=$1 AND student_id=$2 FOR UPDATE',[input.quizId,user.id]);
    if(!quiz||quiz.classroom_id!==classroomId)throw new AppError(409,'This learning session belongs to a previous enrollment. Start a fresh request.');
    const history=quiz.answer_history as AnswerRecord[];
@@ -251,14 +265,16 @@ export class WaterCycle {
    history.push(record);const correctCount=Number(quiz.correct_count)+(correct?1:0);
    const feedback=[{questionId:question.id,correct,explanation:question.explanation}];
    if(correctCount>=2){
-    await promote(tx,classroomId);
+    await this.promote(tx,classroomId);
     const {rows:active}=await tx.query("SELECT id FROM visits WHERE student_id=$1 AND status IN ('waiting','ready','out')",[user.id]);
     if(active.length)throw new AppError(409,'You already have an active break request.');
     const {rows:[capacity]}=await tx.query("SELECT c.capacity,(SELECT COUNT(*) FROM visits WHERE classroom_id=c.id AND status IN ('ready','out')) AS occupied,(SELECT COUNT(*) FROM visits WHERE classroom_id=c.id AND status='waiting') AS waiting FROM classrooms c WHERE c.id=$1",[classroomId]);
     const immediate=Number(capacity.occupied)<Number(capacity.capacity)&&Number(capacity.waiting)===0;
-    const id=randomUUID();await tx.query("INSERT INTO visits(id,classroom_id,student_id,status,purpose,requested_at,left_at) VALUES($1,$2,$3,$4,$5,statement_timestamp(),CASE WHEN $4='out' THEN statement_timestamp() ELSE NULL END)",[id,classroomId,user.id,immediate?'out':'waiting',quiz.purpose]);
+    const departed=await serverClock(tx);const {rows:[scheduled]}=await tx.query('SELECT * FROM classrooms WHERE id=$1',[classroomId]);
+    if(!isClassInSession(classroomFrom(scheduled),this.clock?.()??departed))throw new AppError(409,'Class Not in Session. The session ended before your request completed.');
+    const id=randomUUID();await tx.query("INSERT INTO visits(id,classroom_id,student_id,status,purpose,requested_at,left_at) VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $4='out' THEN $6::timestamptz ELSE NULL END)",[id,classroomId,user.id,immediate?'out':'waiting',quiz.purpose,departed.toISOString()]);
     await tx.query('UPDATE quizzes SET used=TRUE,correct_count=2,answer_history=$1,visit_id=$2 WHERE id=$3',[JSON.stringify(history),id,quiz.id]);
-    if(!immediate)await promote(tx,classroomId);
+    if(!immediate)await this.promote(tx,classroomId);
     const {rows:[visit]}=await tx.query(`${visitSelect} WHERE v.id=$1`,[id]);return{passed:true,correctCount:2,feedback,visit:visitFrom(visit)};
    }
    let seen=quiz.seen_question_ids as string[];
@@ -297,13 +313,13 @@ export class WaterCycle {
   // Commit expiration even if this particular student's subsequent action fails.
   await this.maintainQueue(classroomId);
   const error=await this.db.transaction(async tx=>{
-   await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId,action!=='leave');await promote(tx,classroomId);
+   await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId,action!=='leave',this.clock?.());await this.promote(tx,classroomId);
    const {rows:[visit]}=await tx.query("SELECT * FROM visits WHERE student_id=$1 AND status IN ('waiting','ready','out') FOR UPDATE",[user.id]);
    if(!visit||visit.classroom_id!==classroomId)return 'Your reservation expired or your pass changed. Please refresh.';
-   if(action==='leave') {if(visit.status!=='ready')return 'Please wait for your turn before leaving.';const {rows:[occupied]}=await tx.query("SELECT (SELECT COUNT(*) FROM visits WHERE classroom_id=$1 AND status='out') AS n,capacity FROM classrooms WHERE id=$1",[classroomId]);if(Number(occupied.n)>=Number(occupied.capacity))return 'All spots are occupied after a teacher correction. Keep your place and wait for a spot to open.';await tx.query("UPDATE visits SET status='out',left_at=statement_timestamp(),ready_expires_at=NULL,capacity_paused=FALSE WHERE id=$1",[visit.id]);}
+   if(action==='leave') {if(visit.status!=='ready')return 'Please wait for your turn before leaving.';const {rows:[occupied]}=await tx.query("SELECT (SELECT COUNT(*) FROM visits WHERE classroom_id=$1 AND status='out') AS n,capacity FROM classrooms WHERE id=$1",[classroomId]);if(Number(occupied.n)>=Number(occupied.capacity))return 'All spots are occupied after a teacher correction. Keep your place and wait for a spot to open.';const departed=await serverClock(tx);const {rows:[scheduled]}=await tx.query('SELECT * FROM classrooms WHERE id=$1',[classroomId]);if(!isClassInSession(classroomFrom(scheduled),this.clock?.()??departed))return 'Class Not in Session. The session ended before departure.';await tx.query("UPDATE visits SET status='out',left_at=$2,ready_expires_at=NULL,capacity_paused=FALSE WHERE id=$1",[visit.id,departed.toISOString()]);}
    else if(action==='return') {if(visit.status!=='out')return 'You can record your return after you have left.';await tx.query("UPDATE visits SET status='returned',returned_at=statement_timestamp() WHERE id=$1",[visit.id]);}
    else {if(visit.status==='out')return 'Use I’m back to finish your current trip.';await tx.query("UPDATE visits SET status='cancelled' WHERE id=$1",[visit.id]);}
-   await promote(tx,classroomId);return null;
+   await this.promote(tx,classroomId);return null;
   });
   if(error)throw new AppError(409,error);
  }
@@ -318,7 +334,7 @@ export class WaterCycle {
  async teacherState(user: User, classroomId?: string): Promise<TeacherState> {
   const classroom=await this.ownedClass(user,classroomId);
   const {rows:classes}=await this.db.query(`${classSelect} WHERE c.teacher_id=$1 ORDER BY c.archived,c.name,c.id`,[user.id]);
-  const {rows:pending}=await this.db.query(`${rosterSelect} JOIN classrooms c ON c.id=e.classroom_id WHERE c.teacher_id=$1 AND u.account_status='pending' AND u.password_hash IS NOT NULL ORDER BY u.registered_at,u.id`,[user.id]);
+  const {rows:pending}=await this.db.query(`${rosterSelect} JOIN classrooms c ON c.id=e.classroom_id WHERE c.teacher_id=$1 AND e.status='pending' AND u.password_hash IS NOT NULL ORDER BY e.joined_at,e.id`,[user.id]);
   const pendingStudents=pending.map(row=>({...rosterFrom(row),classroomName:String(classes.find(c=>c.id===row.current_classroom_id)?.name??''),period:nullable(classes.find(c=>c.id===row.current_classroom_id)?.period)}));
   if(!classroom)return{user,pendingStudents,classes:classes.map(classroomFrom),classroom:null,students:[],questions:[],visits:[],stats:{...emptyStats}};
   const id=String(classroom.id);
@@ -333,10 +349,11 @@ export class WaterCycle {
   return{user,pendingStudents,classes:classes.map(classroomFrom),classroom:classroomFrom(classroom),students:students.map(rosterFrom),questions:questions.map(questionFrom),visits:visitModels,stats:{out:Number(stats.out),ready:Number(stats.ready),waiting:Number(stats.waiting),tripsToday:Number(stats.trips_today),averageMinutes:Number(stats.average_minutes||0)}};
  }
  async createClass(user: User,input:z.infer<typeof classCreateSchema>):Promise<Classroom> {
+  requirePasswordChange(user);input=classCreateSchema.parse(input);
   input={...input,code:normalizedCode(input.code),timeZone:timeZone.parse(input.timeZone ?? DEFAULT_TIME_ZONE)};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    await currentActor(tx,user,'teacher',true);const id=randomUUID();
-   const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code,time_zone) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[id,user.id,input.name,input.period || null,input.code,input.timeZone]);
+   const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code,time_zone,start_time,end_time) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',[id,user.id,input.name,input.period || null,input.code,input.timeZone,input.startTime??null,input.endTime??null]);
    await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2 AND classroom_id IS NULL',[id,user.id]);await this.seedQuestions(tx,id);return classroomFrom(row);
   });
  }
@@ -345,10 +362,13 @@ export class WaterCycle {
   if(input.timeZone!==undefined)input={...input,timeZone:timeZone.parse(input.timeZone)};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    const current=await this.selectedClass(user,id,tx,true);await currentActor(tx,user,'teacher',true);
+   const start=input.startTime??nullable(current.start_time),end=input.endTime??nullable(current.end_time);
+   if((input.startTime!==undefined||input.endTime!==undefined)&&(!start||!end||start>=end))throw new AppError(400,'Class end must be after start. Identical and overnight times are not supported.');
    const nextCode=input.code??nullable(current.code);const archived=input.archived??Boolean(current.archived);
    if(!archived&&!nextCode)throw new AppError(400,'Choose a five-character enrollment code before activating this class.');
-   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??effectiveTimeZone(current.time_zone as string | null)]);
+   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6,start_time=$7,end_time=$8 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??effectiveTimeZone(current.time_zone as string | null),start,end]);
    if(archived&&!current.archived){await tx.query("UPDATE visits SET status='cancelled' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[id]);await tx.query('UPDATE quizzes SET used=TRUE WHERE classroom_id=$1 AND used=FALSE',[id]);}
+   await this.promote(tx,id);
    return classroomFrom({...row,student_count:current.student_count});
   });
  }
@@ -365,29 +385,30 @@ export class WaterCycle {
  async addRoster(user:User,input:z.infer<typeof rosterSchema>,classroomId?:string):Promise<RosterStudent> {
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    const classroom=await this.selectedClass(user,classroomId,tx,true);await currentActor(tx,user,'teacher',true);if(classroom.archived)throw new AppError(409,'Archived classes cannot accept new students.');
-   const login=usernameFor(input.firstName,input.lastName);if(login.length<2||reservedAdministratorUsername(login))throw new AppError(400,'Choose a valid student name and username.');
-   const id=randomUUID();const {rows:[row]}=await tx.query("INSERT INTO users(id,role,first_name,last_name,username,classroom_id) VALUES($1,'student',$2,$3,$4,$5) RETURNING *",[id,input.firstName,input.lastName,login,classroom.id]);await attachEnrollment(tx,id,String(classroom.id));return rosterFrom(row);
+   const login=await allocatedUsername(tx,input.firstName,input.lastName);
+   const id=randomUUID();const {rows:[row]}=await tx.query("INSERT INTO users(id,role,first_name,last_name,username,classroom_id,tutorial_completed) VALUES($1,'student',$2,$3,$4,$5,FALSE) RETURNING *",[id,input.firstName,input.lastName,login,classroom.id]);await attachEnrollment(tx,id,String(classroom.id));return rosterFrom(row);
   });
  }
- private async enrolledStudent(user:User,id:string,connection:SQL=this.db,lock=false):Promise<Row> {
-  await currentActor(connection,user,'teacher');const {rows:[student]}=await connection.query(`SELECT u.*,e.classroom_id AS current_classroom_id FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE JOIN classrooms c ON c.id=e.classroom_id WHERE u.id=$1 AND u.role='student' AND c.teacher_id=$2${lock?' FOR UPDATE OF u':''}`,[id,user.id]);
-  if(!student)throw new AppError(404,'Student not found in your classes.');return student;
+ private async enrolledStudent(user:User,id:string,connection:SQL=this.db,lock=false,classroomId?:string):Promise<Row> {
+  await currentActor(connection,user,'teacher');
+  const {rows}=await connection.query(`SELECT u.*,e.id AS enrollment_id,e.status AS enrollment_status,e.approved_at AS enrollment_approved_at,e.classroom_id AS current_classroom_id FROM users u JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE JOIN classrooms c ON c.id=e.classroom_id WHERE u.id=$1 AND u.role='student' AND c.teacher_id=$2 AND ($3::text IS NULL OR c.id=$3)${lock?' FOR UPDATE OF u,e':''}`,[id,user.id,classroomId??null]);
+  if(!rows.length)throw new AppError(404,'Student not found in your classes.');
+  if(rows.length>1)throw new AppError(409,'Select the class enrollment you want to manage.');return rows[0];
  }
- async updateRoster(user:User,id:string,input:z.infer<typeof rosterUpdateSchema>) {
-  requirePasswordChange(user);const previous=await this.enrolledStudent(user,id);const hash=input.password?await hashPassword(input.password):undefined;
-  await this.db.transaction(async tx=>{await lockClasses(tx,[String(previous.current_classroom_id)]);const student=await this.enrolledStudent(user,id,tx,true);if(student.current_classroom_id!==previous.current_classroom_id)throw new AppError(409,'This student’s class changed. Refresh and try again.');await currentActor(tx,user,'teacher',true);
-   if(input.accountStatus!==undefined && input.enabled!==undefined && (input.accountStatus==='active')!==input.enabled)throw new AppError(400,'Choose one consistent account status.');
-   const nextStatus=input.accountStatus ?? (input.enabled===undefined?undefined:input.enabled?'active':'deactivated');
-   if(nextStatus && nextStatus!==student.account_status){
-    if(nextStatus==='active'&&!student.password_hash)throw new AppError(409,'The student must register before approval.');
-    await tx.query("UPDATE users SET account_status=$1,enabled=$2,approved_at=CASE WHEN $1='active' THEN statement_timestamp() ELSE approved_at END,approved_by=CASE WHEN $1='active' THEN $3 ELSE approved_by END WHERE id=$4",[nextStatus,nextStatus==='active',user.id,id]);
-    await tx.query('INSERT INTO student_status_events(id,student_id,teacher_id,classroom_id,previous_status,status) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),id,user.id,student.current_classroom_id,student.account_status,nextStatus]);
+ async updateRoster(user:User,id:string,input:z.infer<typeof rosterUpdateSchema>,classroomId?:string) {
+  requirePasswordChange(user);const previous=await this.enrolledStudent(user,id,this.db,false,classroomId);const hash=input.password?await hashPassword(input.password):undefined;
+  await this.db.transaction(async tx=>{await lockClasses(tx,[String(previous.current_classroom_id)]);const student=await this.enrolledStudent(user,id,tx,true,String(previous.current_classroom_id));await currentActor(tx,user,'teacher',true);
+   if(input.accountStatus!==undefined&&input.enabled!==undefined&&(input.accountStatus==='active')!==input.enabled)throw new AppError(400,'Choose one consistent enrollment status.');
+   const nextStatus=input.accountStatus??(input.enabled===undefined?undefined:input.enabled?'active':'deactivated');const status=nextStatus==='active'?'approved':nextStatus;
+   if(status&&status!==student.enrollment_status){
+    if(status==='approved'&&!student.password_hash)throw new AppError(409,'Set a temporary password before approving this roster account.');
+    await tx.query("UPDATE enrollments SET status=$1,approved_at=CASE WHEN $1='approved' THEN statement_timestamp() ELSE approved_at END,approved_by=CASE WHEN $1='approved' THEN $2 ELSE approved_by END WHERE id=$3",[status,user.id,student.enrollment_id]);
+    await tx.query('INSERT INTO student_status_events(id,student_id,teacher_id,classroom_id,previous_status,status) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),id,user.id,student.current_classroom_id,student.enrollment_status,status]);
    }
    if(hash){await tx.query('UPDATE users SET password_hash=$1,must_change_password=TRUE WHERE id=$2',[hash,id]);await tx.query('DELETE FROM sessions WHERE user_id=$1',[id]);}
-   if(nextStatus==='deactivated'||hash){
-    await tx.query("UPDATE visits SET status='cancelled' WHERE student_id=$1 AND status IN ('waiting','ready')",[id]);
-    await tx.query('UPDATE quizzes SET used=TRUE WHERE student_id=$1 AND used=FALSE',[id]);
-    await promote(tx,String(student.current_classroom_id));
+   if(status==='deactivated'||hash){
+    await tx.query("UPDATE visits SET status='cancelled',cancellation_reason='This class enrollment was deactivated or its account access changed.' WHERE student_id=$1 AND classroom_id=$2 AND status IN ('waiting','ready')",[id,student.current_classroom_id]);
+    await tx.query('UPDATE quizzes SET used=TRUE WHERE student_id=$1 AND classroom_id=$2 AND used=FALSE',[id,student.current_classroom_id]);await this.promote(tx,String(student.current_classroom_id));
    }
   });
  }
@@ -396,17 +417,17 @@ export class WaterCycle {
   let classId=classroomId;
   if(classId)await this.selectedClass(user,classId);
   else {const {rows:[member]}=await this.db.query('SELECT e.classroom_id FROM enrollments e JOIN classrooms c ON c.id=e.classroom_id WHERE e.student_id=$1 AND c.teacher_id=$2 ORDER BY e.active DESC,e.joined_at DESC LIMIT 1',[id,user.id]);if(!member)throw new AppError(404,'Student not found in your classes.');classId=String(member.classroom_id);}
-  const {rows:[student]}=await this.db.query('SELECT u.*,e.classroom_id AS current_classroom_id FROM users u JOIN enrollments e ON e.student_id=u.id WHERE u.id=$1 AND e.classroom_id=$2',[id,classId]);if(!student)throw new AppError(404,'Student not found in this class.');
+  const {rows:[student]}=await this.db.query('SELECT u.*,e.id AS enrollment_id,e.status AS enrollment_status,e.approved_at AS enrollment_approved_at,e.classroom_id AS current_classroom_id FROM users u JOIN enrollments e ON e.student_id=u.id WHERE u.id=$1 AND e.classroom_id=$2',[id,classId]);if(!student)throw new AppError(404,'Student not found in this class.');
   const {rows:visits}=await this.db.query(`${visitSelect} WHERE v.student_id=$1 AND v.classroom_id=$2 ORDER BY v.requested_at DESC LIMIT 1000`,[id,classId]);return{student:rosterFrom(student),visits:visits.map(visitFrom)};
  }
- async removeStudent(user:User,id:string) {await this.moveStudent(user,id,null);}
- async transferStudent(user:User,id:string,classroomId:string) {await this.moveStudent(user,id,classroomId);}
- private async moveStudent(user:User,id:string,destination:string|null) {
-  requirePasswordChange(user);const previous=await this.enrolledStudent(user,id);const source=String(previous.current_classroom_id);if(destination===source)throw new AppError(409,'The student is already enrolled in that class.');
+ async removeStudent(user:User,id:string,source?:string) {await this.moveStudent(user,id,null,source);}
+ async transferStudent(user:User,id:string,classroomId:string,source?:string) {await this.moveStudent(user,id,classroomId,source);}
+ private async moveStudent(user:User,id:string,destination:string|null,requestedSource?:string) {
+  requirePasswordChange(user);const previous=await this.enrolledStudent(user,id,this.db,false,requestedSource);const source=String(previous.current_classroom_id);if(destination===source)throw new AppError(409,'The student is already enrolled in that class.');
   await this.db.transaction(async tx=>{await lockClasses(tx,[source,destination]);await currentActor(tx,user,'teacher',true);
-   const student=await this.enrolledStudent(user,id,tx,true);if(student.current_classroom_id!==source)throw new AppError(409,'This student’s class changed. Refresh and try again.');
+   const student=await this.enrolledStudent(user,id,tx,true,source);if(student.current_classroom_id!==source)throw new AppError(409,'This student’s class changed. Refresh and try again.');
    if(destination){const target=await this.selectedClass(user,destination,tx);if(target.archived)throw new AppError(409,'Students cannot transfer into an archived class.');}
-   await finishStudentVisits(tx,id);await tx.query('UPDATE enrollments SET active=FALSE,left_at=CURRENT_TIMESTAMP WHERE student_id=$1 AND active=TRUE',[id]);await tx.query('UPDATE users SET classroom_id=NULL WHERE id=$1',[id]);if(destination)await attachEnrollment(tx,id,destination);await promote(tx,source);
+   await tx.query("UPDATE visits SET status=CASE WHEN status='out' THEN 'returned' ELSE 'cancelled' END,returned_at=CASE WHEN status='out' THEN statement_timestamp() ELSE returned_at END WHERE student_id=$1 AND classroom_id=$2 AND status IN ('waiting','ready','out')",[id,source]);await tx.query('UPDATE quizzes SET used=TRUE WHERE student_id=$1 AND classroom_id=$2 AND used=FALSE',[id,source]);await tx.query('UPDATE enrollments SET active=FALSE,left_at=statement_timestamp() WHERE student_id=$1 AND classroom_id=$2 AND active=TRUE',[id,source]);await tx.query('UPDATE users SET classroom_id=(SELECT classroom_id FROM enrollments WHERE student_id=$1 AND active=TRUE ORDER BY joined_at LIMIT 1) WHERE id=$1',[id]);if(destination)await attachEnrollment(tx,id,destination,String(student.enrollment_status));await this.promote(tx,source);
   });
  }
  async saveQuestion(user:User,input:z.infer<typeof questionSchema>,id?:string,classroomId?:string):Promise<Question|void> {
@@ -422,7 +443,7 @@ export class WaterCycle {
   requirePasswordChange(user);await currentActor(this.db,user,'teacher',true);const {rows:[previous]}=await this.db.query('SELECT v.classroom_id FROM visits v JOIN classrooms c ON c.id=v.classroom_id WHERE v.id=$1 AND c.teacher_id=$2',[id,user.id]);if(!previous)throw new AppError(404,'Pass not found.');
   await this.db.transaction(async tx=>{await lockClasses(tx,[String(previous.classroom_id)]);await currentActor(tx,user,'teacher',true);const {rows:[visit]}=await tx.query('SELECT * FROM visits WHERE id=$1 FOR UPDATE',[id]);
    if(action==='return'){if(visit.status!=='out')throw new AppError(409,'This student is not currently out.');await tx.query("UPDATE visits SET status='returned',returned_at=statement_timestamp() WHERE id=$1",[id]);}
-   else {if(!['ready','waiting'].includes(String(visit.status)))throw new AppError(409,'Only a queued or ready pass can be cancelled.');await tx.query("UPDATE visits SET status='cancelled' WHERE id=$1",[id]);}await promote(tx,String(visit.classroom_id));
+   else {if(!['ready','waiting'].includes(String(visit.status)))throw new AppError(409,'Only a queued or ready pass can be cancelled.');await tx.query("UPDATE visits SET status='cancelled' WHERE id=$1",[id]);}await this.promote(tx,String(visit.classroom_id));
   });
  }
  async reopenVisit(user:User,id:string,input:{resolveOlder?:boolean;reason?:string}={}) {
@@ -432,7 +453,7 @@ export class WaterCycle {
   await this.db.transaction(async tx=>{
    await lockClasses(tx,[String(previous.classroom_id)]);await currentActor(tx,user,'teacher',true);
    const {rows:[student]}=await tx.query("SELECT * FROM users WHERE id=$1 AND role='student' FOR UPDATE",[previous.student_id]);
-   if(!student||student.classroom_id!==previous.classroom_id)throw new AppError(409,'This student is no longer in the original class. Resolve their current enrollment before reopening this break.');
+   if(!student||!(await tx.query('SELECT id FROM enrollments WHERE student_id=$1 AND classroom_id=$2 AND active=TRUE',[previous.student_id,previous.classroom_id])).rows.length)throw new AppError(409,'This student is no longer in the original class. Resolve their current enrollment before reopening this break.');
    const {rows:[visit]}=await tx.query("SELECT *,returned_at>=statement_timestamp()-INTERVAL '24 hours' AS recent FROM visits WHERE id=$1 FOR UPDATE",[id]);
    if(visit.status!=='returned'||!visit.left_at||!visit.returned_at||new Date(String(visit.returned_at))<new Date(String(visit.left_at)))throw new AppError(409,'Only a completed break with valid departure and return times can be reopened.');
    const reason=input.reason?.trim()||'Teacher confirmed the student is still outside.';
@@ -440,11 +461,11 @@ export class WaterCycle {
    if(!visit.recent&&(!input.resolveOlder||reason.length<10||!input.reason?.trim()))throw new AppError(409,'This return is older than 24 hours. Confirm the older correction and provide a reason of at least 10 characters.');
    const {rows:active}=await tx.query("SELECT id FROM visits WHERE student_id=$1 AND status IN ('waiting','ready','out')",[student.id]);
    if(active.length)throw new AppError(409,'This student already has an active break or queue entry. Resolve it before reopening this break.');
-   await promote(tx,String(previous.classroom_id));
+   await this.promote(tx,String(previous.classroom_id));
    await tx.query('INSERT INTO break_corrections(id,visit_id,teacher_id,incorrect_returned_at,reason) SELECT $1,id,$3,returned_at,$4 FROM visits WHERE id=$2',[randomUUID(),id,user.id,reason]);
    await tx.query("UPDATE visits SET status='out',returned_at=NULL,ready_expires_at=NULL,capacity_paused=FALSE WHERE id=$1",[id]);
    await tx.query('UPDATE quizzes SET used=TRUE WHERE student_id=$1 AND used=FALSE',[student.id]);
-   await promote(tx,String(previous.classroom_id));
+   await this.promote(tx,String(previous.classroom_id));
   });
  }
  async submitReport(user:User,input:ReportInput) {return this.db.transaction(async tx=>{await currentActor(tx,user,'teacher',true,true);return submitProblemReport(tx,user.id,input);});}
@@ -462,10 +483,17 @@ export class WaterCycle {
   for(const row of queueClasses)await this.maintainQueue(String(row.classroom_id));
   const [{rows:teachers},{rows:classes},{rows:students},{rows:[usage]}]=await Promise.all([
    this.db.query(`${teacherSelect} WHERE u.role='teacher' ORDER BY u.last_name,u.first_name`),this.db.query(`${classSelect} ORDER BY c.archived,t.last_name,c.name`),
-   this.db.query(`SELECT u.*,e.classroom_id AS current_classroom_id,c.name AS classroom_name,c.teacher_id,t.first_name AS teacher_first_name,t.last_name AS teacher_last_name,(SELECT COUNT(*) FROM visits v WHERE v.student_id=u.id AND v.left_at>=DATE_TRUNC('day',CURRENT_TIMESTAMP)) AS visits_today FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE LEFT JOIN classrooms c ON c.id=e.classroom_id LEFT JOIN users t ON t.id=c.teacher_id WHERE u.role='student' ORDER BY u.last_name,u.first_name`),
+   this.db.query(`SELECT u.*,e.id AS enrollment_id,e.status AS enrollment_status,e.approved_at AS enrollment_approved_at,e.classroom_id AS current_classroom_id,c.name AS classroom_name,c.teacher_id,t.first_name AS teacher_first_name,t.last_name AS teacher_last_name,(SELECT COUNT(*) FROM visits v WHERE v.student_id=u.id AND v.left_at>=DATE_TRUNC('day',CURRENT_TIMESTAMP)) AS visits_today FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.active=TRUE LEFT JOIN classrooms c ON c.id=e.classroom_id LEFT JOIN users t ON t.id=c.teacher_id WHERE u.role='student' ORDER BY u.last_name,u.first_name`),
    this.db.query("SELECT COUNT(*) AS total,COUNT(*) FILTER(WHERE left_at>=DATE_TRUNC('day',CURRENT_TIMESTAMP)) AS today,COUNT(*) FILTER(WHERE status='out') AS out,COUNT(*) FILTER(WHERE status='waiting') AS waiting FROM visits")
   ]);
-  const teacherModels=teachers.map(teacherFrom);const studentModels:AdminStudent[]=students.map(row=>({...rosterFrom(row),classroomName:nullable(row.classroom_name),teacherId:nullable(row.teacher_id),teacherName:row.teacher_id?`${row.teacher_first_name} ${row.teacher_last_name}`:null}));
+  const teacherModels=teachers.map(teacherFrom);const studentModels:AdminStudent[]=[];
+  for(const id of [...new Set(students.map(row=>String(row.id)))]){
+   const row=students.find(row=>row.id===id)!;
+   const {rows:members}=await this.db.query(`${classSelect} JOIN enrollments e ON e.classroom_id=c.id AND e.student_id=$1 AND e.active=TRUE ORDER BY c.name`,[id]);
+   const {rows:permissions}=await this.db.query('SELECT * FROM enrollments WHERE student_id=$1 AND active=TRUE',[id]);
+   const enrollments:StudentEnrollment[]=members.map(member=>{const permission=permissions.find(e=>e.classroom_id===member.id)!;return{id:String(permission.id),classroom:classroomFrom(member),status:permission.status as StudentEnrollment['status'],joinedAt:iso(permission.joined_at)!,approvedAt:iso(permission.approved_at),inSession:false,eligible:false};});
+   studentModels.push({...rosterFrom({...row,enrollment_status:undefined}),accountStatus:row.account_suspended?'deactivated':'active',accountSuspended:Boolean(row.account_suspended),enrollments,classroomName:null,teacherId:null,teacherName:null});
+  }
   const {rows:[tickets]}=await this.db.query("SELECT COUNT(*) AS n FROM problem_reports WHERE status='need_attention'");
   return{user,attentionTickets:Number(tickets.n),teachers:teacherModels,classes:classes.map(classroomFrom),students:studentModels,stats:{teachers:teachers.length,activeTeachers:teacherModels.filter(t=>t.enabled).length,inactiveTeachers:teacherModels.filter(t=>!t.enabled).length,activeClasses:classes.filter(c=>!c.archived).length,students:studentModels.filter(s=>s.registered).length,tripsToday:Number(usage.today),totalTrips:Number(usage.total),out:Number(usage.out),waiting:Number(usage.waiting)}};
  }

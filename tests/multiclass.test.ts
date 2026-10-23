@@ -1,3 +1,4 @@
+import { WorkflowTestApp as WaterCycle } from './student-fixtures';
 import { approveStudent } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,7 +6,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '../src/lib/db';
 import { bootstrapAdministrator, ADMIN_USERNAME } from '../src/lib/bootstrap-admin';
 import { AppError, createSession, hashPassword, sessionUser, userFrom } from '../src/lib/auth';
-import { WaterCycle, requirePasswordChange, teacherUpdateSchema } from '../src/lib/domain';
+import { requirePasswordChange, teacherUpdateSchema } from '../src/lib/domain';
 import type { Classroom, Question, Quiz, User } from '../src/lib/contracts';
 
 const teacherPassword = 'Classroom-teacher-2026!';
@@ -118,21 +119,15 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     assert.notEqual(reused.id, firstClass.id);
   });
 
-  it('automatically enrolls valid signups once and preserves custom usernames and roster claims', async () => {
-    const entry = await app.addRoster(teacher, { firstName: 'Roster', lastName: 'Learner' }, secondClass.id);
-    const claimed = await register('Roster', secondClass.code!);
-    assert.equal(claimed.id, entry.id);
-    assert.equal(claimed.classroomId, secondClass.id);
-    const custom = await register('Custom', otherClass.code!, 'customlearner');
-    assert.equal(custom.username, 'customlearner');
-    assert.equal(custom.classroomId, otherClass.id);
-    assert.equal((await app.teacherState(otherTeacher, otherClass.id)).students.some(student => student.id === custom.id), true);
-    assert.equal((await app.teacherState(teacher, secondClass.id)).students.some(student => student.id === custom.id), false);
-    await assert.rejects(() => register('Custom', otherClass.code!, 'customlearner'), status(409));
-    const { rows: [count] } = await db.query('SELECT COUNT(*) AS n FROM enrollments WHERE student_id=$1 AND active=TRUE', [custom.id]);
-    assert.equal(Number(count.n), 1);
-    await assert.rejects(db.query('INSERT INTO enrollments(id,student_id,classroom_id,active) VALUES($1,$2,$3,TRUE)', [randomUUID(), custom.id, secondClass.id]), sqlCode('23505'));
-    await assert.rejects(() => register('Nonexistent', '99999'), status(400));
+  it('separates duplicate names and permits multiple independent memberships without duplicating any pair',async()=>{
+    const entry=await app.addRoster(teacher,{firstName:'Roster',lastName:'Learner'},secondClass.id);
+    const registered=await register('Roster',secondClass.code!);assert.notEqual(registered.id,entry.id);
+    const second=await register('Roster',otherClass.code!);assert.notEqual(second.username,registered.username);
+    await app.enrollStudent(registered,otherClass.code!);
+    const state=await app.studentState(registered);assert.equal(state.enrollments.length,2);assert.equal(state.enrollments.find(e=>e.classroom.id===otherClass.id)?.status,'pending');
+    await assert.rejects(()=>app.enrollStudent(registered,otherClass.code!),status(409));
+    await assert.rejects(db.query('INSERT INTO enrollments(id,student_id,classroom_id) VALUES($1,$2,$3)',[randomUUID(),registered.id,otherClass.id]),sqlCode('23505'));
+    await assert.rejects(()=>register('Nonexistent','99999'),status(400));
   });
 
   it('transfers students only within the owning teacher and preserves departure history and FIFO', async () => {
@@ -163,11 +158,11 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
     const quiz = await app.newQuiz(learner, 'restroom');
     await app.transferStudent(teacher, learner.id, secondClass.id);
     const moved = await refreshed(learner);
-    await assert.rejects(() => answer(moved, quiz), status(409));
+    await assert.rejects(() => answer(moved, quiz), status(403));
     const next = await app.newQuiz(moved, 'restroom');
     await app.removeStudent(teacher, learner.id);
     const removed = await refreshed(learner);
-    await assert.rejects(() => answer(removed, next), status(409));
+    await assert.rejects(() => answer(removed, next), status(403));
     assert.equal((await app.studentState(removed)).currentVisit, null);
   });
 

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, ArrowUpRight, BookOpen, Check, ChevronLeft, Droplets, GraduationCap, Leaf, LoaderCircle, LockKeyhole, ShieldCheck, Sprout, Users } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, Check, Copy, ChevronLeft, Droplets, GraduationCap, Leaf, LoaderCircle, LockKeyhole, ShieldCheck, Sprout, Users } from "lucide-react";
 import { api, post } from "@/lib/client";
 import type { AuthState, Role, User } from "@/lib/contracts";
 import { TeacherDashboard } from "@/components/teacher-dashboard";
@@ -23,9 +23,8 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [studentFirstName, setStudentFirstName] = useState("");
   const [studentLastName, setStudentLastName] = useState("");
-  const [registrationUsername, setRegistrationUsername] = useState("");
-  const [customUsername, setCustomUsername] = useState(false);
-  const [classroomCode, setClassroomCode] = useState("");
+  const [createdStudent, setCreatedStudent] = useState<User | null>(null);
+  const [copied, setCopied] = useState(false);
   async function loadSession() {
     setLoading(true); setInitialError("");
     try {
@@ -47,11 +46,10 @@ export default function Home() {
   }
   function changeMode(next: Mode) {
     setMode(next); setError(""); setPassword("");
-    if (next === "signup") { setStudentFirstName(""); setStudentLastName(""); setRegistrationUsername(""); setCustomUsername(false); setClassroomCode(""); }
+    if (next === "signup") { setStudentFirstName(""); setStudentLastName(""); }
   }
   function updateStudentName(first: string, last: string) {
     setStudentFirstName(first); setStudentLastName(last);
-    if (!customUsername) setRegistrationUsername(`${first}${last}`.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""));
   }
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
@@ -61,15 +59,15 @@ export default function Home() {
       if (mode === "login") result = await post("/auth/login", { username, password, role });
       else if (mode === "signup") result = await post("/auth/signup", {
         firstName: form.get("firstName"), lastName: form.get("lastName"), password,
-        username: registrationUsername, classroomCode: form.get("classroomCode"),
       });
       else throw new Error("Please choose a sign-in option.");
-      setUser(result.user); setPassword("");
+      if(mode === "signup")setCreatedStudent(result.user);else setUser(result.user); setPassword("");
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   }
   if (loading) return <main className="loading-page"><Droplets size={40} /><span>Finding your flow…</span><LoaderCircle className="spin" size={20} /></main>;
   if (initialError) return <main className="loading-page"><Droplets size={40} /><h1>Let’s reconnect.</h1><p role="alert">{initialError}</p><button className="button primary" onClick={() => void loadSession()}>Try again</button></main>;
+  if(createdStudent)return <main className="auth-page registration-confirmation"><section className="auth-panel"><div className="auth-form-wrap"><span className="eyebrow">YOUR ACCOUNT IS READY</span><h1>Welcome to WaterCycle, {createdStudent.firstName}!</h1><p>Your Username Is:</p><h2 data-testid="assigned-username">{createdStudent.username}</h2><button className="button secondary" onClick={async()=>{try{await navigator.clipboard.writeText(createdStudent.username);setCopied(true);}catch{setError("Select and copy your username above.");}}}><Copy size={17}/>{copied?"Copied!":"Copy username"}</button><p>Please remember your username. You will need it to sign in to WaterCycle.</p><p className="muted">Next, join your teachers’ classes from My Classes. Each teacher approves your enrollment separately.</p>{error&&<p role="alert">{error}</p>}<button className="button primary auth-submit" onClick={()=>{setUser(createdStudent);setCreatedStudent(null);}}>Continue to Student Portal<ArrowRight size={18}/></button></div></section></main>;
   if (user?.role === "admin") return <main className="loading-page"><Droplets size={40} /><span>Opening the Administrator Portal…</span></main>;
   if (user) return user.role === "teacher" ? <TeacherDashboard user={user} onLogout={() => void logout()} /> : <StudentDashboard user={user} onLogout={() => void logout()} />;
   return <main className="auth-page">
@@ -95,12 +93,12 @@ export default function Home() {
         {mode !== "login" && <button className="auth-back" onClick={() => changeMode("login")}><ChevronLeft size={15} /> Back to sign in</button>}
         <span className="eyebrow">{mode === "signup" ? "LET’S GET YOU SET UP" : "WELCOME TO WATERCYCLE"}</span>
         <h2>{mode === "signup" ? "Hello, new explorer." : "Good to see you."}</h2>
-        <p className="auth-subtitle">{mode === "signup" ? "Join your class and make yourself at home." : "Sign in and pick up where you left off."}</p>
+        <p className="auth-subtitle">{mode === "signup" ? "Create your account, then join your teachers’ classes." : "Sign in and pick up where you left off."}</p>
         {mode === "login" && <div className="role-tabs" aria-label="Account type"><button className={role === "student" ? "selected" : ""} onClick={() => { setRole("student"); setError(""); }}><Sprout size={17} /> I’m a student</button><button className={role === "teacher" ? "selected" : ""} onClick={() => { setRole("teacher"); setError(""); }}><GraduationCap size={18} /> I’m a teacher</button></div>}
         <form onSubmit={submit} className="auth-form">
           {mode !== "login" && <div className="form-grid"><label className="field">First name<input className="input" name="firstName" aria-label="First name" autoComplete="given-name" required maxLength={50} placeholder="Jamie" value={studentFirstName} onChange={e => updateStudentName(e.target.value, studentLastName)} /></label><label className="field">Last name<input className="input" name="lastName" aria-label="Last name" autoComplete="family-name" required maxLength={50} placeholder="Chen" value={studentLastName} onChange={e => updateStudentName(studentFirstName, e.target.value)} /></label></div>}
-          {mode !== "signup" && <label className="field">Username<input className="input" aria-label="Username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required maxLength={100} placeholder={role === "student" ? "e.g. jamiechen" : "Your teacher username"} spellCheck={false} autoCapitalize="none" />{role === "student" && mode === "login" && <span className="field-hint">Your first + last name, with no spaces.</span>}</label>}
-          {mode === "signup" && <><label className="field">Username<input className="input" aria-label="Username" autoComplete="username" value={registrationUsername} onChange={e => { setCustomUsername(true); setRegistrationUsername(e.target.value.toLowerCase()); }} required minLength={2} maxLength={100} pattern="[a-z0-9]+" spellCheck={false} autoCapitalize="none" /><span className="field-hint">Your first + last name is suggested. Use letters and numbers.</span></label><label className="field">Classroom code<input className="input code-input" name="classroomCode" aria-label="Classroom code" autoComplete="off" required minLength={5} maxLength={5} pattern="[A-Za-z0-9]{5}" placeholder="Five letters or numbers" autoCapitalize="characters" spellCheck={false} value={classroomCode} onChange={e => setClassroomCode(e.target.value.toUpperCase())} /><span className="field-hint">Your code enrolls you in the correct teacher’s class automatically.</span></label></>}
+          {mode !== "signup" && <label className="field">Username<input className="input" aria-label="Username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required maxLength={1024} placeholder={role === "student" ? "e.g. jamiechen01" : "Your teacher username"} spellCheck={false} autoCapitalize="none" />{role === "student" && mode === "login" && <span className="field-hint">Use the username assigned when you registered. Existing usernames still work.</span>}</label>}
+          {mode === "signup" && <p className="alert info">WaterCycle automatically assigns a unique username from your name and a number. We’ll show your saved username after you create your account. You can join classes afterward.</p>}
           <label className="field">Password<input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "login" ? 1 : 8} maxLength={128} placeholder={mode === "login" ? "Enter your password" : "At least 8 characters"} /></label>
           {mode === "login" && <p className="password-help"><LockKeyhole size={13} /> {role === "student" ? "Forgot your password? Ask your teacher to reset it." : "Use the password you chose for your teacher account."}</p>}
           {error && <div className="alert error" role="alert">{error}</div>}

@@ -61,7 +61,7 @@ export function RuleOffenders({ classes }: { classes:Classroom[] }) {
     {!data&&busy?<p className={styles.loading} role="status"><RefreshCw size={18}/>Loading classroom activity…</p>:data?.violations.length?<>
       <div className={styles.scroll} role="region" aria-label="Rule Offenders records" tabIndex={0}>
         <table className="data-table"><thead><tr><th>Student Name</th><th>Class / Period</th><th>Date of Violation</th><th>Break Duration</th><th>Total Violations</th></tr></thead><tbody>{data.violations.map(row=><tr key={row.id} data-violation-id={row.id}>
-          <td><strong>{row.studentName}</strong></td><td>{row.classroomName}{row.period&&<small>Period {row.period.replace(/^period\s*/i,'')}</small>}</td>
+          <td><strong>{row.studentName}</strong><small className="muted"> {row.studentUsername}</small></td><td>{row.classroomName}{row.period&&<small>Period {row.period.replace(/^period\s*/i,'')}</small>}</td>
           <td><time dateTime={row.violatedAt}>{formatClassTimestamp(row.violatedAt,row.timeZone)}</time><small>{row.timeZone}</small></td>
           <td><span className={styles.duration}>{row.ongoing&&<Clock3 size={14}/>} {duration(row,now)}</span>{row.ongoing&&<small className={styles.ongoing}>Ongoing break</small>}</td><td><span className="badge red">{row.totalViolations}</span></td>
         </tr>)}</tbody></table>

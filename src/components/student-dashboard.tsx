@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Bell, BellRing, BookOpen, Check, CheckCircle2, ChevronRight, CircleHelp, Clock3, Droplets, Footprints, History, Home, Leaf, LoaderCircle, LogOut, ShieldCheck, Sparkles, Sprout, Timer, Toilet, TriangleAlert, Users, Volume2, VolumeX, X } from "lucide-react";
 import { api, duration, post, time } from "@/lib/client";
-import type { BreakPurpose, Quiz, QuizResult, StudentState, User, Visit } from "@/lib/contracts";
+import type { BreakPurpose, Classroom, Quiz, QuizResult, StudentState, User, Visit } from "@/lib/contracts";
+import { scheduleLabel } from "@/lib/class-schedule";
+import { US_TIME_ZONES } from "@/lib/time-zones";
 import { formatClassDate } from "@/lib/time-zones";
 import styles from "./student-dashboard.module.css";
 
@@ -44,6 +46,9 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   const [now, setNow] = useState(() => Date.now());
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [joinOpen,setJoinOpen]=useState(false);
+  const [joinPreview,setJoinPreview]=useState<Classroom|null>(null);
+  const [requestedClassId,setRequestedClassId]=useState("");
   const [enrollmentCode, setEnrollmentCode] = useState("");
   const previousClassroom = useRef<string | null | undefined>(undefined);
   const previousStatus = useRef<string | null>(null);
@@ -94,7 +99,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
     if (changed || !state.canRequestPass) {
       setQuiz(null); setPendingQuiz(null); setResult(null); setAnswer(-1); setChoosingPurpose(false); setPurpose(null);
     }
-    if (changed) setMessage("Your class enrollment has changed. Your earlier activity is still available.");
+    if (changed) setMessage("Classroom view updated. Your earlier activity is still available.");
     previousClassroom.current = classroomId;
   }, [state?.classroom?.id, state?.canRequestPass]);
   useEffect(() => {
@@ -119,7 +124,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
     if (prior?.status === "ready" && !state.currentVisit && prior.readyExpiresAt && Date.parse(prior.readyExpiresAt) <= Date.parse(state.serverNow)) {
       setMessage("Your response window expired. Request a new break when you’re ready.");
     } else if (prior && ["ready", "waiting"].includes(prior.status) && !state.currentVisit && state.recentVisits.some(item => item.id === prior.id && item.status === "cancelled")) {
-      setMessage("Your request has ended. Request a new break when you’re ready.");
+      setMessage(state.recentVisits.find(item=>item.id===prior.id)?.cancellationReason || "Your request has ended. Request a new break during an approved class session.");
     }
     if (status === "ready" && previousStatus.current === "waiting") {
       setMessage("It's your turn! You're cleared to go.");
@@ -174,14 +179,15 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   }
 
   async function startQuiz() {
-    if (!state?.classroom || !state.canRequestPass) {
+    if (!state?.eligibleClassroomIds.length || !state.canRequestPass) {
       setError(state?.unavailableReason || "Join an active class before requesting a pass.");
       return;
     }
     if (!purpose) return;
+    if(state.eligibleClassroomIds.length>1&&!requestedClassId){setError("Choose which class you are attending.");return;}
     beginMutation(); setMessage("");
     try {
-      const data = await post<Quiz>("/student/quiz", { purpose });
+      const data = await post<Quiz>("/student/quiz", { purpose, classroomId: requestedClassId || (state.eligibleClassroomIds.length === 1 ? state.eligibleClassroomIds[0] : undefined) });
       setQuiz(data); setPendingQuiz(null); setAnswer(-1); setResult(null); setChoosingPurpose(false);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load questions."); }
     finally { await finishMutation(); }
@@ -255,17 +261,18 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   }
 
   async function enroll(event: React.FormEvent) {
-    event.preventDefault();
+    event.preventDefault();setDialogError("");
     if (!/^[A-Z0-9]{5}$/.test(enrollmentCode)) {
       setError("Enter the five-character code your teacher gave you. Use English letters and numbers.");
       return;
     }
     beginMutation(); setMessage("");
     try {
-      await post("/student/enroll", { classroomCode: enrollmentCode });
+      if(!joinPreview){const data=await post<{classroom:Classroom}>("/student/enroll/preview",{classroomCode:enrollmentCode});setJoinPreview(data.classroom);return;}
+      await post("/student/enroll", { classroomCode: enrollmentCode, classroomId: joinPreview.id });
       setEnrollmentCode(""); setQuiz(null); setResult(null);
-      setMessage("You’re enrolled. Your teacher must approve your account before you can request a break.");
-    } catch (err) { setError(err instanceof Error ? err.message : "Could not join this class. Check the code with your teacher."); }
+      setJoinOpen(false);setJoinPreview(null);setMessage("Class Joined! Waiting for Teacher Approval. Your teacher must approve your enrollment before you can request breaks during this class.");
+    } catch (err) { setDialogError(err instanceof Error ? err.message : "Could not join this class. Check the code with your teacher."); }
     finally { await finishMutation(); }
   }
 
@@ -281,7 +288,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
   const used = state?.activeCount ?? 0;
   const serverNow = now + serverOffset.current;
   const breakMilliseconds = visit?.status === "out" && visit.leftAt ? Math.max(0, serverNow - Date.parse(visit.leftAt)) : 0;
-  const showTutorial = !mustChangePassword && Boolean(state?.classroom) && !state?.user.tutorialCompleted && !tutorialCompleted;
+  const showTutorial = !mustChangePassword && Boolean(state) && !state?.user.tutorialCompleted && !tutorialCompleted;
   const showWarning = visit?.status === "out" && breakMilliseconds >= 12 * 60000 && !visit.warningAcknowledgedAt && !acknowledgedWarnings.has(visit.id);
 
   return <div className="app-shell">
@@ -294,7 +301,7 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
         <button className="nav-item" onClick={() => { setDialogError(""); setHelp(true); }}><CircleHelp size={19} /> How Breaks Work</button>
       </nav>
       <div className={styles.sidebarNote}><Leaf size={25} /><strong>Small questions.<br />Growing minds.</strong><p>A little biology before a little break.</p></div>
-      <div className="sidebar-bottom"><div className={styles.profile}><span className="avatar">{user.firstName[0]}{user.lastName[0]}</span><div><strong>{user.firstName} {user.lastName}</strong><span>Student account</span></div></div><button className="nav-item" onClick={onLogout}><LogOut size={18} /> Sign out</button></div>
+      <div className="sidebar-bottom"><div className={styles.profile}><span className="avatar">{user.firstName[0]}{user.lastName[0]}</span><div><strong>{user.firstName} {user.lastName}</strong><span>{state?.user.username ?? user.username}</span></div></div><button className="nav-item" onClick={onLogout}><LogOut size={18} /> Sign out</button></div>
     </aside>
     <main className="workspace">
       <header className="topbar"><div className="topbar-left"><span className="muted">Student space</span><ChevronRight size={14} /><strong>{view === "home" ? "My dashboard" : "My activity"}</strong></div><div className="topbar-right"><span className={`badge ${classroom && !classroom.archived && !connectionError ? "green" : "gray"} ${styles.desktopBadge}`}><span className={styles.liveDot} />{connectionError ? "Reconnecting" : classroom?.archived ? "Archived classroom" : classroom ? "Classroom connected" : state ? "Enrollment needed" : "Connecting"}</span><button type="button" className={`button ghost small ${styles.alertToggle}`} onClick={() => void enableAlerts()} aria-pressed={sound} aria-label={sound ? "Turn off sound alerts" : "Enable turn alerts"}>{sound ? <Volume2 size={17} /> : <VolumeX size={17} />}<span>{sound ? "Alerts on" : "Enable alerts"}</span></button></div></header>
@@ -309,10 +316,11 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
           : !state ? <section className={`card ${styles.loading}`} aria-busy="true"><LoaderCircle className={styles.spin} size={28} /><p>Finding your classroom…</p></section>
             : view === "activity" ? <section className="card"><div className="card-header"><div><h2>Your trip history</h2><p className="muted">Recent completed trips and cancelled requests.</p></div><span className="badge gray">{history.length} records</span></div><HistoryTable visits={history} /></section>
               : <>
+                <section className={`card ${styles.myClasses}`} aria-labelledby="my-classes-heading"><div className="card-header"><div><h2 id="my-classes-heading">My Classes</h2><p className="muted">One account · Username: <strong>{state.user.username}</strong></p></div><button className="button primary small" onClick={()=>{setJoinOpen(true);setJoinPreview(null);setEnrollmentCode("");setDialogError("");}}>+ Join a Class</button></div>{!state.enrollments.length?<div className="empty-state"><h3>You haven&apos;t joined a class yet.</h3><p>Enter the class code provided by your teacher to get started.</p></div>:<div className={styles.enrollmentList}>{state.enrollments.map(enrollment=><article className={styles.enrollmentItem} key={enrollment.id}><div><h3>{enrollment.classroom.name}</h3><p>{enrollment.classroom.teacherName}</p><p>{scheduleLabel(enrollment.classroom)}</p><p>{US_TIME_ZONES.find(zone=>zone.value===enrollment.classroom.timeZone)?.label ?? enrollment.classroom.timeZone}</p></div><div><span className={`badge ${enrollment.status==="approved"?"green":enrollment.status==="pending"?"orange":"gray"}`}>{enrollment.status==="approved"?"Approved":enrollment.status==="pending"?"Pending Approval":"Deactivated"}</span><p className="muted">{enrollment.eligible?"In session · Breaks available":enrollment.unavailableReason}</p></div></article>)}</div>}</section>
                 <div className={styles.studentGrid}>
                   <div className={styles.mainColumn}>
                     {visit ? <section className={`${styles.passCard} ${styles[visit.status]}`}>
-                      <div className={styles.passCardTop}><span className={styles.passTag}>{visit.status === "waiting" ? <Users size={16} /> : visit.status === "ready" ? <BellRing size={16} /> : <Footprints size={16} />}{visit.status === "waiting" ? "IN THE QUEUE" : visit.status === "ready" ? "YOUR TURN IS HERE" : "CURRENTLY ON BREAK"}</span><span className={styles.passId}>CLASSROOM BREAK</span></div>
+                      <div className={styles.passCardTop}><span className={styles.passTag}>{visit.status === "waiting" ? <Users size={16} /> : visit.status === "ready" ? <BellRing size={16} /> : <Footprints size={16} />}{visit.status === "waiting" ? "IN THE QUEUE" : visit.status === "ready" ? "YOUR TURN IS HERE" : "CURRENTLY ON BREAK"}</span><span className={styles.passId}>{visit.classroomName ?? "CLASSROOM BREAK"}</span></div>
                       <span className={styles.purposeBadge}>{visit.purpose === "water" ? <Droplets size={15} /> : <Toilet size={15} />}{purposeName(visit.purpose)}</span>
                       {visit.status === "waiting" ? <>
                         <h2 aria-live="polite">You&apos;re in line!</h2>
@@ -334,9 +342,6 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
                         {breakMilliseconds >= 10 * 60000 && <div className={styles.timeReminder} role="status"><Clock3 size={18} /><span>You&apos;ve reached the 10-minute limit. Please return to class and click &ldquo;I&apos;m Back.&rdquo;</span></div>}
                         <div className={styles.passActions}><button className="button primary" disabled={busy} onClick={() => void action("/student/return", "Welcome back! Your return time has been saved.")}><CheckCircle2 size={19} />I&apos;m Back<ArrowRight size={17} /></button></div>
                       </>}
-                    </section> : !classroom ? <section className={`card ${styles.enrollmentCard}`}>
-                      <div className={styles.circleIcon}><Users size={27} /></div><p className="eyebrow">FIND YOUR CLASSROOM</p><h2>Join a class to get started.</h2><p className="muted">Your account and past activity are safe. Enter your teacher’s five-character code to join the right class automatically.</p>
-                      <form onSubmit={enroll}><label className="field">Class enrollment code<input className={`input ${styles.codeInput}`} aria-label="Class enrollment code" aria-describedby="enrollment-code-help" pattern="[A-Za-z0-9]{5}" minLength={5} maxLength={5} autoComplete="off" autoCapitalize="characters" spellCheck={false} required placeholder="e.g. BIO01" value={enrollmentCode} onChange={event => setEnrollmentCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))} /></label><p id="enrollment-code-help" className="field-hint">Use five English letters or numbers, including any zeros at the beginning.</p><button className="button primary" disabled={busy || enrollmentCode.length !== 5}>{busy ? <LoaderCircle className={styles.spin} size={18} /> : <Users size={18} />}Join class<ArrowRight size={18} /></button></form>
                     </section> : quiz ? <section className={`card ${styles.quizCard}`}>
                       <div className="card-header"><div><p className="eyebrow">A QUICK LEARNING</p><h2>A moment for biology.</h2></div><span className={`badge green ${styles.quizProgress}`} role="status"><BookOpen size={14} />Correct Answers: {result?.correctCount ?? quiz.correctCount}/2</span></div>
                       <span className={styles.purposeBadge}>{quiz.purpose === "water" ? <Droplets size={15} /> : <Toilet size={15} />}{purposeName(quiz.purpose)}</span>
@@ -349,17 +354,17 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
                         <div className={styles.quizFooter}><button type="button" className="button ghost" disabled={busy} onClick={() => void cancelQuiz()}>Cancel learning check</button>{pendingQuiz ? <button key="next-question" type="button" className="button primary" disabled={busy} onClick={() => { setQuiz(pendingQuiz); setPendingQuiz(null); setAnswer(-1); setResult(null); }}>Next question<ArrowRight size={17} /></button> : <button key="check-answer" type="submit" className="button primary" disabled={busy || answer < 0}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <CheckCircle2 size={17} />}Check my answer</button>}</div>
                       </form>
                     </section> : choosingPurpose ? <section className={`card ${styles.purposeCard}`}>
-                      <p className="eyebrow">FIRST, A LITTLE DIRECTION</p><h2>What kind of break?</h2><p className="muted">Choose your purpose, then give your brain a quick biology moment.</p>
+                      {state.eligibleClassroomIds.length>1&&<label className="field">Which class are you attending?<select className="select" aria-label="Break class" required value={requestedClassId} onChange={event=>setRequestedClassId(event.target.value)}><option value="">Choose your class</option>{state.enrollments.filter(e=>e.eligible).map(e=><option key={e.id} value={e.classroom.id}>{e.classroom.name} · {e.classroom.teacherName}</option>)}</select></label>}<p className="eyebrow">FIRST, A LITTLE DIRECTION</p><h2>What kind of break?</h2><p className="muted">Choose your purpose, then give your brain a quick biology moment.</p>
                       <fieldset className={styles.purposeFieldset} disabled={busy}><legend className={styles.purposeLegend}>Choose a break purpose</legend><div className={styles.purposeOptions}>
                         <label className={`${styles.purposeOption} ${purpose === "restroom" ? styles.purposeSelected : ""}`}><input type="radio" name="break-purpose" aria-label="Use Restroom" value="restroom" checked={purpose === "restroom"} onChange={() => setPurpose("restroom")} /><span><Toilet size={34} strokeWidth={1.5} /></span><strong>Use Restroom</strong><small>A quick restroom break</small></label>
                         <label className={`${styles.purposeOption} ${styles.waterOption} ${purpose === "water" ? styles.purposeSelected : ""}`}><input type="radio" name="break-purpose" aria-label="Drink Water" value="water" checked={purpose === "water"} onChange={() => setPurpose("water")} /><span><Droplets size={34} strokeWidth={1.5} /></span><strong>Drink Water</strong><small>A moment to refresh</small></label>
                       </div></fieldset>
-                      <div className={styles.quizFooter}><button type="button" className="button ghost" disabled={busy} onClick={() => { setChoosingPurpose(false); setPurpose(null); }}>Back to dashboard</button><button className="button primary" disabled={busy || !purpose || !state.canRequestPass} onClick={() => void startQuiz()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <BookOpen size={17} />}Continue<ArrowRight size={17} /></button></div>
-                    </section> : <section className={styles.hero}><div className={styles.heroCopy}><span className={styles.heroPill}><Sparkles size={14} />A BRAIN BREAK STARTS HERE</span><h2>Ready for a<br />little break?</h2><p>A quick learning, then a little breathing room.<br className={styles.desktopBreak} /> Let&apos;s keep our classroom flowing.</p><button className="button primary" disabled={busy || (!restricted && (!state.canRequestPass || state.availableQuestions < 2))} onClick={() => { if(restricted){setAccessNotice(true);return;} setChoosingPurpose(true); setPurpose(null); setError(""); }}>{busy ? <LoaderCircle size={18} className={styles.spin} /> : <BookOpen size={18} />}Request a Break<ArrowRight size={18} /></button>{state.canRequestPass && state.availableQuestions < 2 && <p className={styles.unavailable}>Your teacher needs to add at least two active questions before you can request a break.</p>}<div className={styles.heroFootnote}><ShieldCheck size={15} />Two correct answers. A fair turn. Back in 10 minutes.</div></div><div className={styles.heroArt} aria-hidden="true"><div className={styles.orbitOne} /><div className={styles.orbitTwo} /><div className={styles.plant}><Sprout size={144} strokeWidth={1.2} /></div><span className={styles.artSpark}>✦</span><span className={styles.artLeaf}><Leaf size={25} /></span><span className={styles.artLabel}>ROOM TO GROW</span></div></section>}
+                      <div className={styles.quizFooter}><button type="button" className="button ghost" disabled={busy} onClick={() => { setChoosingPurpose(false); setPurpose(null); }}>Back to dashboard</button><button className="button primary" disabled={busy || !purpose || !state.canRequestPass || (state.eligibleClassroomIds.length>1&&!requestedClassId)} onClick={() => void startQuiz()}>{busy ? <LoaderCircle className={styles.spin} size={17} /> : <BookOpen size={17} />}Continue<ArrowRight size={17} /></button></div>
+                    </section> : <section className={styles.hero}><div className={styles.heroCopy}><span className={styles.heroPill}><Sparkles size={14} />A BRAIN BREAK STARTS HERE</span><h2>Ready for a<br />little break?</h2><p>A quick learning, then a little breathing room.<br className={styles.desktopBreak} /> Let&apos;s keep our classroom flowing.</p><button className="button primary" disabled={busy} onClick={() => { if(restricted||!state.canRequestPass){setAccessNotice(true);return;} setRequestedClassId(state.eligibleClassroomIds.length===1?state.eligibleClassroomIds[0]:""); setChoosingPurpose(true); setPurpose(null); setError(""); }}>{busy ? <LoaderCircle size={18} className={styles.spin} /> : <BookOpen size={18} />}Request a Break<ArrowRight size={18} /></button>{state.canRequestPass && state.availableQuestions < 2 && <p className={styles.unavailable}>Your teacher needs to add at least two active questions before you can request a break.</p>}<div className={styles.heroFootnote}><ShieldCheck size={15} />Two correct answers. A fair turn. Back in 10 minutes.</div></div><div className={styles.heroArt} aria-hidden="true"><div className={styles.orbitOne} /><div className={styles.orbitTwo} /><div className={styles.plant}><Sprout size={144} strokeWidth={1.2} /></div><span className={styles.artSpark}>✦</span><span className={styles.artLeaf}><Leaf size={25} /></span><span className={styles.artLabel}>ROOM TO GROW</span></div></section>}
                     <section className={`card ${styles.recentCard}`}><div className="card-header"><div><h2>Your recent activity</h2><p className="muted">A quick look at your last few breaks.</p></div><button className="button ghost small" onClick={() => setView("activity")}>View all<ArrowRight size={15} /></button></div><HistoryTable visits={history.slice(0, 3)} /></section>
                   </div>
                   <aside className={styles.rightColumn}>
-                    {classroom ? <section className={`card ${styles.capacityCard}`}><div className="card-header"><h2>Classroom flow</h2><span className={styles.liveLabel}><span className={styles.liveDot} />LIVE</span></div><p className="muted">A maximum of {capacity} students at a time keeps things moving.</p><div className={styles.capacitySlots}>{Array.from({ length: capacity }, (_, index) => <div key={index} className={`${styles.capacitySlot} ${index < used ? styles.slotUsed : ""}`}><div><Footprints size={24} strokeWidth={1.6} /></div><strong>{index < used ? "In use" : "Available"}</strong><span>Space {index + 1}</span></div>)}</div><div className={styles.queueSummary}><Users size={17} /><span>{state.waitingCount === 0 ? "No one is waiting" : `${state.waitingCount} ${state.waitingCount === 1 ? "student" : "students"} in the queue`}</span></div><p className={styles.capacityNote}>Spaces include students getting ready to leave.</p></section> : <section className={`card ${styles.enrollmentInfo}`}><div className="card-header"><h2>A place for your learning.</h2><Sprout size={24} /></div><p>Each teacher’s code connects you to a specific class period. You won’t need to choose a teacher or class yourself.</p><div><ShieldCheck size={19} /><p>Your existing account and previous trip records stay with you when your enrollment changes.</p></div></section>}
+                    {classroom ? <section className={`card ${styles.capacityCard}`}><div className="card-header"><h2>Classroom flow</h2><span className={styles.liveLabel}><span className={styles.liveDot} />LIVE</span></div><p className="muted">A maximum of {capacity} students at a time keeps things moving.</p><div className={styles.capacitySlots}>{Array.from({ length: capacity }, (_, index) => <div key={index} className={`${styles.capacitySlot} ${index < used ? styles.slotUsed : ""}`}><div><Footprints size={24} strokeWidth={1.6} /></div><strong>{index < used ? "In use" : "Available"}</strong><span>Space {index + 1}</span></div>)}</div><div className={styles.queueSummary}><Users size={17} /><span>{state.waitingCount === 0 ? "No one is waiting" : `${state.waitingCount} ${state.waitingCount === 1 ? "student" : "students"} in the queue`}</span></div><p className={styles.capacityNote}>Spaces include students getting ready to leave.</p></section> : <section className={`card ${styles.enrollmentInfo}`}><div className="card-header"><h2>A place for your learning.</h2><Sprout size={24} /></div><p>Each teacher’s code connects you to a specific class period. Join as many classes as you attend. Each teacher approves your enrollment separately.</p><div><ShieldCheck size={19} /><p>Your existing account and previous trip records stay with you when your enrollment changes.</p></div></section>}
                     <section className={styles.stepsCard}><span className="eyebrow">A GOOD FLOW, IN THREE STEPS</span><h2>Think. Go. Grow.</h2><ol><li><span>01</span><div><strong>Give your brain a moment</strong><p>Choose your break purpose. Get two biology answers right in total.</p></div></li><li><span>02</span><div><strong>Wait for your green light</strong><p>Your timer starts if a space is open. Otherwise, join the line and watch for your turn.</p></div></li><li><span>03</span><div><strong>Return within 10 minutes</strong><p>Click &ldquo;I&apos;m Back&rdquo; when you return so the next student can go.</p></div></li></ol></section>
                   </aside>
                 </div>
@@ -367,13 +372,14 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
               </>}
       </div>
     </main>
-    {accessNotice && !showWarning && <StudentModal labelledBy="access-heading" onDismiss={()=>setAccessNotice(false)}><h2 id="access-heading">{accountStatus==="deactivated"?"Break Access Unavailable":"Account Approval Required"}</h2><p>{accountStatus==="deactivated"?"Your account is currently deactivated. Please contact your teacher if you believe this is a mistake.":"Your account has not been approved by your teacher yet. Please contact your teacher to request approval before using WaterCycle's break system."}</p><div className="modal-actions"><button className="button primary" onClick={()=>setAccessNotice(false)}>Got It</button></div></StudentModal>}
+    {joinOpen && !showWarning && <StudentModal labelledBy="join-class-heading" onDismiss={()=>setJoinOpen(false)}><div className="modal-header"><h2 id="join-class-heading">Join a Class</h2><button className="button ghost small" aria-label="Close join class" onClick={()=>setJoinOpen(false)}><X size={20}/></button></div><form onSubmit={enroll}><label className="field">Class enrollment code<input className={`input ${styles.codeInput}`} aria-label="Class enrollment code" pattern="[A-Za-z0-9]{5}" minLength={5} maxLength={5} required autoCapitalize="characters" autoComplete="off" disabled={Boolean(joinPreview)} value={enrollmentCode} onChange={event=>setEnrollmentCode(event.target.value.toUpperCase())}/></label>{joinPreview&&<div className="alert info"><div><h3>{joinPreview.name}</h3><p>Teacher: {joinPreview.teacherName}</p><p>{scheduleLabel(joinPreview)}</p><p>{joinPreview.timeZone}</p><p>Your teacher must approve this enrollment before you can request breaks.</p></div></div>}{dialogError&&<p className="alert error" role="alert">{dialogError}</p>}<div className="modal-actions">{joinPreview&&<button className="button secondary" type="button" disabled={busy} onClick={()=>setJoinPreview(null)}>Change code</button>}<button className="button primary" disabled={busy}>{busy?"One moment…":joinPreview?"Confirm Join":"Find Class"}</button></div></form></StudentModal>}
+    {accessNotice && !showWarning && <StudentModal labelledBy="access-heading" onDismiss={()=>setAccessNotice(false)}><h2 id="access-heading">{restricted?"Break Access Unavailable":"No Eligible Class in Session"}</h2><p>{restricted?"Your account is currently deactivated. Please contact your school administrator.":"You can only request a break during a class you are approved to attend. Please check your class schedule or enrollment status."}</p><p className="muted">Pending enrollments need teacher approval. Deactivated enrollments have no break access. Check My Classes for each class’s schedule and status.</p><div className="modal-actions"><button className="button primary" onClick={()=>setAccessNotice(false)}>Got It</button></div></StudentModal>}
     {(showTutorial || help) && !showWarning && <StudentModal labelledBy="help-heading" onDismiss={showTutorial ? undefined : () => setHelp(false)}>
       <div className={styles.tutorialArt}><Sprout size={34} strokeWidth={1.5} /></div>
       <div className="modal-header"><div><p className="eyebrow">A LITTLE GUIDE TO A GOOD FLOW</p><h2 id="help-heading">Welcome to WaterCycle</h2><p>A quick learning. A little breathing room. Here&apos;s how your break works.</p></div>{!showTutorial && <button className="button ghost small" onClick={() => setHelp(false)} aria-label="Close How Breaks Work"><X size={20} /></button>}</div>
       <ol className={styles.tutorialSteps}>
-        <li><div className={styles.tutorialStepTop}><Footprints size={27} strokeWidth={1.5} /><span>STEP 01</span></div><div><h3>Request a Break</h3><p>Choose whether you need to use the restroom or drink water.</p></div></li>
-        <li><div className={styles.tutorialStepTop}><BookOpen size={27} strokeWidth={1.5} /><span>STEP 02</span></div><div><h3>Quick Learning</h3><p>Answer two biology questions correctly. Your correct answers add up.</p></div></li>
+        <li><div className={styles.tutorialStepTop}><Footprints size={27} strokeWidth={1.5} /><span>STEP 01</span></div><div><h3>Join Your Classes</h3><p>Your username is saved in your account information. Use + Join a Class and your teacher’s code. Each teacher approves your enrollment separately.</p></div></li>
+        <li><div className={styles.tutorialStepTop}><BookOpen size={27} strokeWidth={1.5} /><span>STEP 02</span></div><div><h3>Request and Learn</h3><p>Request during an approved Monday–Friday class session, choose a class if sessions overlap, and answer two biology questions correctly. Your correct answers add up.</p></div></li>
         <li><div className={styles.tutorialStepTop}><BellRing size={27} strokeWidth={1.5} /><span>STEP 03</span></div><div><h3>Get Your Turn</h3><p>An open space starts your timer immediately. Otherwise, wait for your turn and tap &ldquo;I&apos;m Leaving Now.&rdquo;</p></div></li>
         <li><div className={styles.tutorialStepTop}><CheckCircle2 size={27} strokeWidth={1.5} /><span>STEP 04</span></div><div><h3>Return to Class</h3><p>Return within 10 minutes and click &ldquo;I&apos;m Back&rdquo; when you return.</p></div></li>
       </ol>
@@ -430,5 +436,5 @@ function StudentModal({ children, labelledBy, describedBy, onDismiss, warning = 
 function HistoryTable({ visits }: { visits: Visit[] }) {
   if (visits.length === 0) return <div className="empty-state"><div className={styles.emptyIcon}><History size={25} /></div><h3>A fresh start.</h3><p className="muted">Your completed breaks will appear here.</p></div>;
   const showClass = visits.some(visit => Boolean(visit.classroomName));
-  return <div className="table-wrap"><table className="data-table"><thead><tr><th>Date</th>{showClass && <th>Class</th>}<th>Purpose</th><th>Left</th><th>Returned</th><th>Duration</th><th>Status</th></tr></thead><tbody>{visits.map(visit => <tr key={visit.id}><td>{formatClassDate(visit.requestedAt, visit.timeZone, { month: "short", day: "numeric" })}</td>{showClass && <td>{visit.classroomName || "Earlier class"}</td>}<td>{visit.purpose ? purposeName(visit.purpose) : "Not recorded"}</td><td>{time(visit.leftAt, visit.timeZone)}</td><td>{time(visit.returnedAt, visit.timeZone)}</td><td>{duration(visit.leftAt, visit.returnedAt)}</td><td><span className={`badge ${visit.status === "returned" ? "green" : "gray"}`}>{visit.status === "returned" ? "Returned" : "Cancelled"}</span></td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table className="data-table"><thead><tr><th>Date</th>{showClass && <th>Class</th>}<th>Purpose</th><th>Left</th><th>Returned</th><th>Duration</th><th>Status</th></tr></thead><tbody>{visits.map(visit => <tr key={visit.id}><td>{formatClassDate(visit.requestedAt, visit.timeZone, { month: "short", day: "numeric" })}</td>{showClass && <td>{visit.classroomName || "Earlier class"}</td>}<td>{visit.purpose ? purposeName(visit.purpose) : "Not recorded"}</td><td>{time(visit.leftAt, visit.timeZone)}</td><td>{time(visit.returnedAt, visit.timeZone)}</td><td>{duration(visit.leftAt, visit.returnedAt)}</td><td><span className={`badge ${visit.status === "returned" ? "green" : "gray"}`}>{visit.status === "returned" ? "Returned" : "Cancelled"}</span>{visit.cancellationReason&&<small>{visit.cancellationReason}</small>}</td></tr>)}</tbody></table></div>;
 }

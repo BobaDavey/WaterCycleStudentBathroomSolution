@@ -1,4 +1,4 @@
-import { test,expect } from '@playwright/test';
+import { test,expect } from './fixtures';
 
 test('development provisioning explains automatic secret setup without prefilling credentials or requesting production bootstrap',async({page})=>{
  await page.route('**/api/auth/me',route=>route.fulfill({json:{user:null,adminProvisioned:false,developmentSetup:'missing-secret'}}));

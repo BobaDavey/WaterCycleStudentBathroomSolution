@@ -24,7 +24,7 @@ export async function verifyPassword(password: string, hash: string | null) {
 export function digest(value: string) { return createHash('sha256').update(value).digest('hex'); }
 export function safeEqual(a: string, b: string) { const left = Buffer.from(digest(a)); const right = Buffer.from(digest(b)); return timingSafeEqual(left, right); }
 export function userFrom(row: Record<string, unknown>): User {
- return { id: String(row.id), role: row.role as User['role'], firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), classroomId: row.classroom_id == null ? null : String(row.classroom_id), mustChangePassword: Boolean(row.must_change_password), email: row.email == null ? null : String(row.email), tutorialCompleted: row.tutorial_completed !== false, accountStatus: row.role === 'student' ? (row.account_status ?? 'pending') as User['accountStatus'] : null };
+ return { id: String(row.id), role: row.role as User['role'], firstName: String(row.first_name), lastName: String(row.last_name), username: String(row.username), classroomId: row.classroom_id == null ? null : String(row.classroom_id), mustChangePassword: Boolean(row.must_change_password), email: row.email == null ? null : String(row.email), tutorialCompleted: row.tutorial_completed !== false, accountStatus: row.role === 'student' ? (row.account_suspended ? 'deactivated' : 'active') : null };
 }
 export async function createSession(db: SQL, userId: string) {
  const token = randomBytes(32).toString('hex');

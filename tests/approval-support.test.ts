@@ -1,8 +1,9 @@
+import { WorkflowTestApp as WaterCycle } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '../src/lib/db';
-import { WaterCycle } from '../src/lib/domain';
+import {} from '../src/lib/domain';
 import { bootstrapAdministrator } from '../src/lib/bootstrap-admin';
 import { AppError, createSession, hashPassword, sessionUser, userFrom } from '../src/lib/auth';
 import { reportSchema } from '../src/lib/problem-reports';
@@ -27,25 +28,25 @@ describe('Student approval, audited return corrections, and private problem repo
  });
  after(async()=>await db.close());
  it('defaults signups and roster claims to Pending while allowing login, tutorial, and limited dashboard',async()=>{
-  const learner=await signup('Pending');assert.equal(learner.accountStatus,'pending');
-  assert.equal((await app.login({username:learner.username,password,role:'student'})).accountStatus,'pending');
+  const learner=await signup('Pending');assert.equal(learner.accountStatus,'active');
+  assert.equal((await app.login({username:learner.username,password,role:'student'})).accountStatus,'active');
   const state=await app.studentState(learner);assert.equal(state.canRequestPass,false);assert.equal(state.activeQuiz,null);assert.equal(state.currentVisit,null);
-  assert.equal(state.unavailableReason,'Your account is awaiting teacher approval.');
+  assert.equal(state.enrollments[0].status,'pending');assert.match(state.unavailableReason!,/approved to attend/);
   await app.completeTutorial(learner);
   await assert.rejects(()=>app.newQuiz(learner,'restroom'),fails(403));await assert.rejects(()=>app.newQuiz(learner,'water'),fails(403));
-  const entry=await app.addRoster(teacher,{firstName:'Claim',lastName:'Student'});assert.equal((await signup('Claim')).id,entry.id);
-  assert.equal((await app.studentState(userFrom((await db.query('SELECT * FROM users WHERE id=$1',[entry.id])).rows[0]))).user.accountStatus,'pending');
+  const entry=await app.addRoster(teacher,{firstName:'Claim',lastName:'Student'});assert.notEqual((await signup('Claim')).id,entry.id);
+  assert.equal((await app.studentState(userFrom((await db.query('SELECT * FROM users WHERE id=$1',[entry.id])).rows[0]))).user.accountStatus,'active');
   assert.equal((await db.query('SELECT * FROM visits')).rows.length,0);assert.equal((await db.query('SELECT * FROM quizzes')).rows.length,0);
  });
  it('lists all owned pending registrations oldest first, excludes other teachers, and saves idempotent approval audit',async()=>{
   const oldest=await signup('Oldest');const second=await signup('Second');await signup('Foreign',otherRoom.code!);
-  await db.query("UPDATE users SET registered_at=statement_timestamp()-INTERVAL '1 day' WHERE id=$1",[oldest.id]);
+  await db.query("UPDATE enrollments SET joined_at=statement_timestamp()-INTERVAL '1 day' WHERE student_id=$1",[oldest.id]);
   assert.deepEqual((await app.teacherState(teacher)).pendingStudents.map(s=>s.id),[oldest.id,second.id]);
   await assert.rejects(()=>app.updateRoster(other,oldest.id,{accountStatus:'active'}),fails(404));
   await assert.rejects(()=>app.updateRoster(oldest,oldest.id,{accountStatus:'active'}),fails(403));
   await app.updateRoster(teacher,oldest.id,{accountStatus:'active'});await app.updateRoster(teacher,oldest.id,{accountStatus:'active'});
   assert.deepEqual((await app.teacherState(teacher)).pendingStudents.map(s=>s.id),[second.id]);
-  const row=(await db.query('SELECT * FROM users WHERE id=$1',[oldest.id])).rows[0];assert.equal(row.approved_by,teacher.id);assert.ok(row.approved_at);
+  const row=(await db.query('SELECT * FROM enrollments WHERE student_id=$1',[oldest.id])).rows[0];assert.equal(row.approved_by,teacher.id);assert.ok(row.approved_at);
   assert.equal((await db.query('SELECT * FROM student_status_events WHERE student_id=$1',[oldest.id])).rows.length,1);
   assert.equal((await app.studentState(oldest)).canRequestPass,true);assert.ok(await app.newQuiz(oldest,'restroom'));
  });
@@ -55,7 +56,7 @@ describe('Student approval, audited return corrections, and private problem repo
   await db.query("INSERT INTO visits(id,student_id,classroom_id,status,purpose,ready_expires_at) VALUES($1,$2,$3,'ready','water',statement_timestamp()+INTERVAL '120 seconds')",[randomUUID(),learner.id,room.id]);
   await assert.rejects(()=>app.studentAction(learner,'leave'),fails(403));
   const state=await app.studentState(learner);assert.equal(state.currentVisit,null);assert.equal(state.activeQuiz,null);assert.equal(state.canRequestPass,false);
-  const login=await app.login({username:learner.username,password,role:'student'});assert.equal(login.accountStatus,'deactivated');
+  const login=await app.login({username:learner.username,password,role:'student'});assert.equal(login.accountStatus,'active');assert.equal((await app.studentState(learner)).enrollments[0].status,'deactivated');
   await app.updateRoster(teacher,learner.id,{accountStatus:'active'});assert.equal((await app.studentState(learner)).canRequestPass,true);
  });
  it('deactivation cancels queue reservations and learning, preserves outside records and sessions, and promotes FIFO',async()=>{
@@ -64,12 +65,12 @@ describe('Student approval, audited return corrections, and private problem repo
   await app.updateRoster(teacher,students[2].id,{accountStatus:'deactivated'});assert.equal((await app.studentState(students[3])).currentVisit?.status,'ready');
   const token=await createSession(db,students[1].id);const before=(await app.studentState(students[1])).currentVisit!;
   await app.updateRoster(teacher,students[1].id,{accountStatus:'deactivated'});
-  assert.equal((await sessionUser(db,token))?.accountStatus,'deactivated');assert.deepEqual((await app.studentState(students[1])).currentVisit,before);
+  assert.equal((await sessionUser(db,token))?.accountStatus,'active');assert.deepEqual((await app.studentState(students[1])).currentVisit,before);
   await app.studentAction(students[1],'return');assert.equal((await app.studentState(students[1])).currentVisit,null);
  });
  it('requires approval again after self-enrollment under a different teacher',async()=>{
   const learner=await approved('Rejoin');await app.removeStudent(teacher,learner.id);await app.enrollStudent(learner,otherRoom.code!);
-  assert.equal((await app.studentState(learner)).user.accountStatus,'pending');
+  assert.equal((await app.studentState(learner)).enrollments[0].status,'pending');
   await assert.rejects(()=>app.updateRoster(teacher,learner.id,{accountStatus:'active'}),fails(404));await app.updateRoster(other,learner.id,{accountStatus:'active'});
   assert.equal((await app.studentState(learner)).canRequestPass,true);
  });

@@ -62,7 +62,7 @@ try{
  await run('git',['clone','--no-hardlinks',process.cwd(),checkout],{},true,root);
  for(const file of ['.env.local','.local/data','node_modules'])await assert.rejects(()=>access(path.join(checkout,file)));
  const container=JSON.parse(await readFile(path.join(checkout,'.devcontainer/devcontainer.json'),'utf8'));
- Object.assign(env,container.containerEnv);
+ Object.assign(env,container.containerEnv,{NODE_OPTIONS:'--import='+path.join(checkout,'tests/school-day-clock.mjs'),WATERCYCLE_TEST_CLOCK_OFFSET_MS:String(Date.parse('2026-07-06T12:30:00Z')-Date.now())});
  assert.equal(container.postCreateCommand,'npm install && npm run dev:setup');
  await run('sh',['-c',container.postCreateCommand]);
  assert.match(await run('npm',['run','dev:doctor']),/PASS:/);
@@ -73,8 +73,8 @@ try{
  assert.equal((await admin('admin/state')).body.user.username,'davidanzezhang');
  assert.equal((await teacher('auth/login',{username:'teachertest',password:'1234567890',role:'teacher'})).status,200);
  assert.equal((await student('auth/login',{username:'teststudent',password:'1234567890',role:'student'})).status,200);
- const teacherState=(await teacher('teacher/state')).body;const studentState=(await student('student/state')).body;
- assert.equal(studentState.user.accountStatus,'active');assert.equal(studentState.classroom.code,'DEMO1');
+ const studentState=(await student('student/state')).body;const teacherState=(await teacher('teacher/state?classroomId='+studentState.classroom.id)).body;
+ assert.equal(studentState.user.accountStatus,'active');assert.deepEqual(teacherState.classes.map(c=>[c.code,c.name,c.timeZone,c.startTime,c.endTime,c.scheduleDays]).sort((a,b)=>a[0].localeCompare(b[0])),[['DEMO1','Demo Biology Morning','America/New_York','07:00','13:00',[1,2,3,4,5]],['DEMO2','Demo Chemistry Afternoon','America/New_York','13:00','18:00',[1,2,3,4,5]]]);assert.ok(teacherState.classes.every(c=>c.teacherId===teacherState.user.id));assert.deepEqual(studentState.enrollments.map(e=>e.classroom.code).sort(),['DEMO1','DEMO2']);assert.ok(studentState.enrollments.every(e=>e.status==='approved'));
  assert.equal(teacherState.classroom.id,studentState.classroom.id);assert.ok(teacherState.students.some(s=>s.username==='teststudent'&&s.accountStatus==='active'));
  assert.equal((await teacher('admin/state')).status,403);assert.equal((await student('admin/state')).status,403);
  assert.equal((await anonymous('admin/state')).status,401);
@@ -88,11 +88,12 @@ try{
  assert.equal((await student('student/return',{})).status,200);
  assert.ok((await student('student/state')).body.recentVisits[0].returnedAt);
  const pending=client(origin);
- assert.equal((await pending('auth/signup',{firstName:'Fresh',lastName:'Pending',password:'DevelopmentOnly123!',classroomCode:'DEMO1'})).body.user.accountStatus,'pending');
+ assert.equal((await pending('auth/signup',{firstName:'Fresh',lastName:'Pending',password:'DevelopmentOnly123!'})).body.user.accountStatus,'active');
+ assert.equal((await pending('student/enroll',{classroomCode:'DEMO1'})).status,200);assert.equal((await pending('student/state')).body.enrollments[0].status,'pending');
  assert.equal((await pending('student/quiz',{purpose:'water'})).status,403);
  const changedPassword=randomBytes(24).toString('base64url');
  assert.equal((await teacher('auth/password',{currentPassword:'1234567890',newPassword:changedPassword})).status,200);
- assert.equal((await teacher('teacher/roster/'+studentState.user.id,{accountStatus:'deactivated'},'PATCH')).status,200);
+ assert.equal((await teacher('teacher/roster/'+studentState.user.id+'?classroomId='+studentState.classroom.id,{accountStatus:'deactivated'},'PATCH')).status,200);
  await stop();
  const preserved=await fingerprint();await run('npm',['run','dev:setup']);assert.equal(await fingerprint(),preserved,'changed password/status/history are never reset');
  assert.match(await run('npm',['run','dev:doctor'],{},false),/password has changed/);
@@ -105,8 +106,8 @@ try{
  assert.equal((await restartedAdmin('admin/state')).body.user.firstName,'Development');
  assert.equal((await teacher('auth/login',{username:'teachertest',password:changedPassword,role:'teacher'})).status,200);
  assert.equal((await student('auth/login',{username:'teststudent',password:'1234567890',role:'student'})).status,200);
- assert.equal((await student('student/state')).body.user.accountStatus,'deactivated');
- assert.equal((await student('student/quiz',{purpose:'water'})).status,403);
+ assert.equal((await student('student/state')).body.enrollments.find(e=>e.classroom.id===studentState.classroom.id).status,'deactivated');
+ assert.equal((await student('student/quiz',{purpose:'water',classroomId:studentState.classroom.id})).status,403);
  await stop();
  const noSecret={...env,ADMIN_INITIAL_PASSWORD:'',DEV_ADMIN_INITIAL_PASSWORD:'',LOCAL_DATABASE_PATH:'.local/no-secret'};
  await run('npm',['run','dev:setup'],noSecret);

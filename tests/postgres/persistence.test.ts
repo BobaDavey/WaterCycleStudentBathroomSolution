@@ -12,7 +12,7 @@ import { createDatabase, type Database, type SQL } from '../../src/lib/db';
 import { baselineSchema, migrations, latestMigrationVersion } from '../../src/lib/migrations';
 import { applyManagedMigrations, schemaStatus } from '../../src/lib/managed-database';
 import { bootstrapAdministrator } from '../../src/lib/bootstrap-admin';
-import { hashPassword } from '../../src/lib/auth';
+import { hashPassword,userFrom } from '../../src/lib/auth';
 import { WaterCycle } from '../../src/lib/domain';
 import { bootstrapDevelopmentAdministrator } from '../../src/lib/development-admin';
 import type { DatabaseBinding } from '../../src/lib/database-policy';
@@ -25,13 +25,13 @@ const production:DatabaseBinding={environment:'production',databaseId:randomUUID
 const credentials={admin:randomBytes(24).toString('hex'),temporary:randomBytes(24).toString('hex'),teacher:randomBytes(24).toString('hex'),student:randomBytes(24).toString('hex')};
 const rolePassword=randomBytes(24).toString('hex');
 const databases=['wc_production','wc_preview','wc_restore','wc_legacy','wc_empty','wc_broken'];
-const tables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events'];
+const tables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events','student_username_counters'];
 let owner:Pool,saved:Record<string,string>;
 function urlFor(name:string,runtime=false){assert.ok(databases.includes(name));const url=new URL(base);url.pathname=`/${name}`;if(runtime){url.username='wc_runtime';url.password=rolePassword;}return url.toString();}
 function poolFor(name:string){return new Pool({connectionString:urlFor(name),max:2});}
 async function transaction<T>(pool:Pool,fn:(tx:SQL)=>Promise<T>){const client=await pool.connect();try{await client.query('BEGIN');const result=await fn(client as SQL);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}
 function adapter(pool:Pool):Database{return{query:pool.query.bind(pool) as SQL['query'],transaction:fn=>transaction(pool,fn),close:async()=>{}};}
-async function snapshot(name:string){const pool=poolFor(name);try{const output:Record<string,unknown[]>={};for(const table of tables)output[table]=(await pool.query(`SELECT to_jsonb(t) AS record FROM public.${table} t ORDER BY to_jsonb(t)::text`)).rows;return output;}finally{await pool.end();}}
+async function snapshot(name:string){const pool=poolFor(name);try{const output:Record<string,unknown[]>={};for(const table of tables){const exists=(await pool.query('SELECT to_regclass($1) AS name',['public.'+table])).rows[0].name;output[table]=exists?(await pool.query(`SELECT to_jsonb(t) AS record FROM public.${table} t ORDER BY to_jsonb(t)::text`)).rows:[];}return output;}finally{await pool.end();}}
 async function grantRuntime(name:string){const pool=poolFor(name);try{await pool.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC');await pool.query('GRANT USAGE ON SCHEMA public TO wc_runtime');for(const table of tables)await pool.query(`GRANT SELECT,INSERT,UPDATE ON TABLE public.${table} TO wc_runtime`);await pool.query('GRANT DELETE ON public.sessions TO wc_runtime');await pool.query('GRANT SELECT ON public.watercycle_migrations,public.watercycle_database_identity,public.watercycle_migration_runs TO wc_runtime');}finally{await pool.end();}}
 async function migrate(name:string,binding:DatabaseBinding,expectedVersion=0,backupReference='verified-isolated-fixture-snapshot'){const db=await createDatabase({url:urlFor(name),binding,bootstrapAdmin:false,migration:{expectedVersion,backupReference}});await db.close();}
 async function run(args:string[],extra:Record<string,string|undefined>={},input?:Buffer){const child=spawn(process.execPath,args,{env:{...process.env,...extra} as NodeJS.ProcessEnv,stdio:['pipe','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',data=>stdout+=data);child.stderr.on('data',data=>stderr+=data);child.stdin.end(input);const code=await new Promise<number|null>(resolve=>{child.once('error',()=>resolve(-1));child.once('exit',resolve);});return{code,stdout,stderr};}
@@ -104,6 +104,24 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
   assert.deepEqual(await snapshot('wc_production'),original);
   await migrate('wc_preview',preview);await grantRuntime('wc_preview');const db=await createDatabase({url:urlFor('wc_preview',true),binding:preview});try{assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM users')).rows[0].n,0);}finally{await db.close();}
  });
+ it('allocates duplicate-name usernames concurrently through the restricted PostgreSQL role and isolates multi-teacher approvals',async()=>{
+  const db=await createDatabase({url:urlFor('wc_preview',true),binding:preview});
+  try{
+   const app=new WaterCycle(db,()=>new Date('2026-07-06T12:30:00Z'));
+   const owner=async(name:string)=>userFrom((await db.query("INSERT INTO users(id,role,first_name,last_name,username) VALUES($1,'teacher',$2,'Teacher',$2) RETURNING *",[randomUUID(),name])).rows[0]);
+   const one=await owner('pgteacherone'),two=await owner('pgteachertwo');
+   const room=await app.createClass(one,{name:'First',code:'PG001',startTime:'08:00',endTime:'09:30'}),other=await app.createClass(two,{name:'Other',code:'PG002',startTime:'08:00',endTime:'09:30'});
+   const students=await Promise.all(Array.from({length:12},()=>app.signup({firstName:'Alex',lastName:'Best',password:randomBytes(24).toString('hex')})));
+   assert.deepEqual(students.map(s=>s.username).sort(),Array.from({length:12},(_,i)=>'alexbest'+String(i+1).padStart(2,'0')));
+   const student=students[0];await Promise.all([app.enrollStudent(student,'PG001'),app.enrollStudent(student,'PG002')]);
+   await app.updateRoster(one,student.id,{accountStatus:'active'},room.id);
+   const state=await app.studentState(student);assert.equal(state.enrollments.find(e=>e.classroom.id===room.id)?.status,'approved');assert.equal(state.enrollments.find(e=>e.classroom.id===other.id)?.status,'pending');
+   await assert.rejects(()=>app.updateRoster(one,student.id,{accountStatus:'active'},other.id),/not found/);
+   await assert.rejects(()=>app.newQuiz(student,'water',other.id),/approval/);
+   const original=await app.newQuiz(student,'water',room.id);await app.cancelQuiz(student,original.id);await app.updateRoster(two,student.id,{accountStatus:'active'},other.id);
+   const competing=await Promise.allSettled([app.newQuiz(student,'water',room.id),app.newQuiz(student,'water',other.id)]);assert.equal(competing.filter(result=>result.status==='fulfilled').length,1);assert.equal((await db.query('SELECT id FROM quizzes WHERE student_id=$1 AND used=FALSE',[student.id])).rows.length,1);
+  }finally{await db.close();}
+ });
  it('requires a backup reference and reviewed version before adopting/migrating an existing schema, preserving original fields',async()=>{
   const pool=poolFor('wc_legacy');try{
    await pool.query(baselineSchema);for(const migration of migrations.filter(m=>m.version<=4)){await pool.query(migration.sql);await pool.query('INSERT INTO watercycle_migrations(version) VALUES($1)',[migration.version]);}
@@ -120,12 +138,12 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
    await assert.rejects(()=>transaction(pool,tx=>applyManagedMigrations({async query<T>(sql:string,params?:unknown[]){if(sql.startsWith('INSERT INTO public.watercycle_migration_runs'))throw new Error('isolated migration failure');return tx.query<T>(sql,params);}},production,{expectedVersion:4,backupReference:'verified-fixture-backup'})),/isolated migration failure/);
    assert.equal((await schemaStatus(pool as SQL,production)).versions.at(-1),4);assert.deepEqual(await snapshot('wc_legacy'),before);
    const concurrent=await Promise.allSettled([migrate('wc_legacy',production,4),migrate('wc_legacy',production,4)]);assert.equal(concurrent.filter(result=>result.status==='fulfilled').length,1);
-   assert.deepEqual(await snapshot('wc_legacy'),before);assert.equal((await schemaStatus(pool as SQL,production)).versions.at(-1),5);
-   await migrate('wc_legacy',production,5,'');assert.deepEqual(await snapshot('wc_legacy'),before);assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM watercycle_migration_runs')).rows[0].n,1);
+   const after=await snapshot('wc_legacy');for(const table of tables)for(let i=0;i<before[table].length;i++)for(const [key,value] of Object.entries((before[table][i] as {record:Record<string,unknown>}).record))assert.deepEqual((after[table][i] as {record:Record<string,unknown>}).record[key],value);assert.equal((await schemaStatus(pool as SQL,production)).versions.at(-1),latestMigrationVersion);
+   await migrate('wc_legacy',production,latestMigrationVersion,'');assert.deepEqual(await snapshot('wc_legacy'),after);assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM watercycle_migration_runs')).rows[0].n,1);
   }finally{await pool.end();}
  });
  it('refuses to recreate missing application tables when the schema ledger already says they exist',async()=>{
-  await migrate('wc_broken',preview);const pool=poolFor('wc_broken');try{await pool.query('DROP TABLE problem_report_events');await assert.rejects(()=>createDatabase({url:urlFor('wc_broken'),binding:preview,migration:{expectedVersion:5,backupReference:'fixture-backup'}}),/tables are missing/);assert.equal((await pool.query("SELECT to_regclass('public.problem_report_events') AS table_name")).rows[0].table_name,null);}finally{await pool.end();}
+  await migrate('wc_broken',preview);const pool=poolFor('wc_broken');try{await pool.query('DROP TABLE problem_report_events');await assert.rejects(()=>createDatabase({url:urlFor('wc_broken'),binding:preview,migration:{expectedVersion:latestMigrationVersion,backupReference:'fixture-backup'}}),/tables are missing/);assert.equal((await pool.query("SELECT to_regclass('public.problem_report_events') AS table_name")).rows[0].table_name,null);}finally{await pool.end();}
  });
  it('creates a private pg_dump backup, protects existing files, and restores all records into a separate empty database',async()=>{
   const bin=path.join(root,'bin');await mkdir(bin,{mode:0o700});

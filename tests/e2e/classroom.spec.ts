@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import {continueRegistration} from './enrollment-helpers';
+import { test, expect, type Page } from './fixtures';
 import type { Question, Quiz, QuizResult, StudentState, TeacherState } from '../../src/lib/contracts';
 
 async function login(page: Page, username: string, password: string, teacher = false) {
@@ -101,23 +102,20 @@ test('three students: quiz gate, two spaces, FIFO alert, departure and return re
   } finally { await Promise.all(contexts.map(c => c.close())); }
 });
 
-test('first-time student signup can sign back in using first+last username', async ({ page }) => {
+test('first-time student signup confirms assigned username and can sign back in without a class code', async ({ page }) => {
   const lastName = `Test${Date.now()}`;
   await page.goto('/');
   await page.getByRole('button', { name: /Create a student account/ }).click();
   await page.getByLabel('First name', { exact: true }).fill('Robin');
   await page.getByLabel('Last name', { exact: true }).fill(lastName);
-  await page.getByLabel('Classroom code').fill('01001');
   await page.getByLabel('Password', { exact: true }).fill('MyBiology2026!');
   await page.getByRole('button', { name: 'Create my account' }).click();
-  await expect(page.getByRole('heading', { name: /Hey, Robin/ })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Welcome to WaterCycle', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
+  const assigned=await continueRegistration(page);expect(assigned).toBe(`robin${lastName}01`.toLowerCase());
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(((await (await page.request.get('/api/auth/me')).json()) as { user: { tutorialCompleted: boolean } }).user.tutorialCompleted).toBe(true);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
-  await login(page, `robin${lastName}`.toLowerCase(), 'MyBiology2026!');
+  await login(page, assigned, 'MyBiology2026!');
   await expect(page.getByRole('heading', { name: /Hey, Robin/ })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Welcome to WaterCycle', exact: true })).toHaveCount(0);
 });
@@ -136,7 +134,7 @@ test('teacher manages a roster account and question bank, then exports trip hist
   const context = await browser.newContext();
   const page = await context.newPage();
   const surname = `Account${Date.now()}`;
-  const studentUsername = `rosa${surname}`.toLowerCase();
+  const studentUsername = `rosa${surname}01`.toLowerCase();
   try {
     await login(page, 'morganreed', 'WaterCycle2026!', true);
     await page.getByRole('button', { name: 'Class Roster', exact: true }).click();
@@ -149,20 +147,8 @@ test('teacher manages a roster account and question bank, then exports trip hist
     await expect(dialog).not.toBeVisible();
     const student = page.getByRole('row').filter({ hasText: studentUsername });
     await expect(student).toBeVisible();
-    // Students claim their roster entry and choose their own first password.
-    const claimContext = await browser.newContext();
-    try {
-      const claim = await claimContext.newPage();
-      await claim.goto('/');
-      await claim.getByRole('button', { name: /Create a student account/ }).click();
-      await claim.getByLabel('First name', { exact: true }).fill('Rosa');
-      await claim.getByLabel('Last name', { exact: true }).fill(surname);
-      await claim.getByLabel('Classroom code').fill('01001');
-      await claim.getByLabel('Password', { exact: true }).fill('FirstBiology2026!');
-      await claim.getByRole('button', { name: 'Create my account' }).click();
-      await expect(claim.getByRole('heading', { name: /Hey, Rosa/ })).toBeVisible();
-      await claim.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
-    } finally { await claimContext.close(); }
+    // Teacher-created accounts receive an assigned username and temporary password;
+    // self-registration never claims someone else's identical-name account.
     await student.getByRole('button', { name: /Reset password/i }).click();
     dialog = page.getByRole('dialog');
     await dialog.getByLabel('Temporary password').fill('Temporary2026!');

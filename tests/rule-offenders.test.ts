@@ -1,10 +1,11 @@
+import { WorkflowTestApp as WaterCycle } from './student-fixtures';
 import { approveStudent } from './student-fixtures';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '../src/lib/db';
 import { AppError, userFrom } from '../src/lib/auth';
-import { WaterCycle, classCreateSchema } from '../src/lib/domain';
+import { classCreateSchema } from '../src/lib/domain';
 import { bootstrapAdministrator } from '../src/lib/bootstrap-admin';
 import { migrations } from '../src/lib/migrations';
 import type { Classroom, User } from '../src/lib/contracts';

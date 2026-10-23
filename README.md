@@ -2,13 +2,13 @@
 
 **A quick learning. A better flow.**
 
-WaterCycle helps teachers manage classroom restroom and water breaks. Students answer biology questions, receive a fair turn, and record their departure and return. Teachers manage classes, approve student accounts, and review activity through a dedicated portal. A separate Developer Portal supports teacher account administration and problem reports.
+WaterCycle helps teachers manage classroom restroom and water breaks. Students answer biology questions, receive a fair turn, and record their departure and return. Teachers manage classes, approve class enrollments, and review activity through a dedicated portal. A separate Developer Portal supports teacher account administration and problem reports.
 
 Built with **Next.js, React, TypeScript, and PostgreSQL**, with the existing green and cream WaterCycle design.
 
 ## Development-only demo accounts
 
-Every fresh Codespace automatically creates these accounts in its own isolated development database. Select the appropriate sign-in tab and enter the credentials manually. Both are enabled; the student is Active and enrolled in the demo teacher’s **Demo Biology** class, code **DEMO1**. No registration or approval is needed for these two samples.
+Every fresh Codespace automatically creates these accounts in its own isolated development database. Select the appropriate sign-in tab and enter the credentials manually. Both are enabled; the student is Active with Approved enrollments in both demo classes below. No registration or approval is needed for these two samples.
 
 | Portal | Username | Password |
 | --- | --- | --- |
@@ -17,35 +17,52 @@ Every fresh Codespace automatically creates these accounts in its own isolated d
 
 These public credentials are for local development only. They are never seeded into Vercel Production or Preview. Setup never resets passwords or account statuses in an existing database. No credential autofill buttons are shown in the app.
 
+The demo teacher owns these exact fresh-development classes (Eastern time, Monday–Friday):
+
+| Class | Code | Session |
+| --- | --- | --- |
+| Demo Biology Morning | `DEMO1` | 7:00 AM–1:00 PM |
+| Demo Chemistry Afternoon | `DEMO2` | 1:00 PM–6:00 PM |
+
+`teststudent` is approved in both for immediate testing during those hours. Create another student to test **My Classes → Join a Class → Pending → teacher approval**. Outside those hours or on weekends, no new demo breaks are permitted; the teacher can edit schedules for weekday testing. Repeated initialization preserves intentional changes in an existing local database rather than restoring defaults.
+
 ## Features at a glance
 
 | Area | What WaterCycle supports |
 | --- | --- |
-| Student accounts | Registration with a class code, teacher approval, and Pending, Active, or Deactivated status |
+| Student accounts | Automatic sequential usernames; one permanent account with multiple independently approved class enrollments |
 | Learning before breaks | Restroom or water purpose selection and two correct biology answers, one question at a time |
 | Classroom flow | Two shared break spaces per class, FIFO waiting lines, reserved turns, and departure/return timers |
-| Teacher controls | Multiple classes, roster management, approvals, password resets, transfers, and account deactivation/reactivation |
+| Teacher controls | Class schedules/time zones, roster approvals, password resets, transfers, and enrollment deactivation/reactivation |
 | Activity tracking | Trip history, CSV exports, twelve-minute warnings, and Rule Offenders reports |
 | Return corrections | Audited **Mark as Still Out** actions that retain the original departure time and handle capacity safely |
 | Support | Teacher problem-report submission and developer-only ticket management |
 
 ## Student Portal
 
-### Register and receive approval
+### Register once and join your classes
 
-1. Choose **Create a student account** on the main sign-in page.
-2. Enter your name, username, password, and your teacher's **five-character enrollment code**. The suggested username is your first and last name together, without spaces.
-3. A valid code identifies the correct teacher and class automatically. Codes accept English letters and numbers, ignore letter case, and retain leading zeros, for example `BIO01` or `00123`.
-4. Your new account starts **Pending**. Sign in, complete the welcome tutorial, and wait for your teacher to approve it.
-5. Once approved, the dashboard recognizes your Active status automatically. You can use the same account without registering again.
+1. Choose **Create a student account** and enter your first name, last name, and password. No class code or chosen username is required.
+2. WaterCycle assigns your saved username on the server: normalized lowercase first + last name, then `01`, `02`, and so on (continuing to `100` after `99`). Spaces, accents, and punctuation are normalized consistently; names that contain no English letters/numbers use `student` as the base. Duplicate names are welcome, usernames are globally unique, and existing usernames never change.
+3. Read **Your Username Is**, use **Copy username**, then **Continue to Student Portal**. Remember this username for sign-in; it also appears in your account information and **My Classes**.
+4. Choose **+ Join a Class**, enter the teacher's five-character code, check the displayed class/teacher, and confirm. Codes are case-insensitive English letters/numbers and retain leading zeros.
+5. **Class Joined! Waiting for Teacher Approval.** Each enrollment starts Pending. Join other teachers’ classes with the same permanent account.
 
-| Account status | Student access |
+| Enrollment status | Break access for that class |
 | --- | --- |
-| Pending | Sign in, view permitted account information and activity, and complete the tutorial; approval is required before requesting a break |
-| Active | Use the normal break workflow when the class and question bank are available |
-| Deactivated | Sign in and view permitted information; new break requests are unavailable until the teacher reactivates the account |
+| Pending Approval | Wait for that class’s teacher to approve |
+| Approved | Request during the class’s scheduled session, subject to existing break rules |
+| Deactivated | Contact that class’s teacher to reactivate enrollment |
 
-Pending students see **Your account is awaiting teacher approval.** Clicking **Request a Break** opens an approval explanation. Deactivated students receive a status-specific explanation. Server checks also prevent these accounts from starting questions, qualifying for a new break, joining a queue, reserving a space, or departing.
+Approval or deactivation in one class does not affect another. Account-wide security restrictions remain separate. Students see their own class names, teachers, schedules, time zones, enrollment statuses, eligibility, and historical trips. Teachers see only their own memberships and class-specific activity.
+
+### Class sessions
+
+Teachers configure **start time**, **end time**, and one of the seven U.S. time zones in Class Roster. Sessions recur **Monday–Friday**. Start is inclusive; end is exclusive. Equal/overnight times are rejected. An existing class with no saved schedule cannot accept new breaks until its teacher sets one; no arbitrary hours are assigned during migration.
+
+The server uses its own time and IANA daylight-saving rules. A student’s computer clock or time zone cannot grant access. If exactly one approved class is eligible, it is selected automatically. If approved sessions overlap, the student must select which class they are attending. With none available, **No Eligible Class in Session** explains the restriction. The question bank and all existing capacity/security checks still apply.
+
+When a class ends, waiting requests and reservations are cancelled with an explanation on the next queue check (student/teacher polling or an action); they cannot depart after the end. An already active break continues from its original UTC departure, including reminders, warnings, return, and teacher correction controls. A student may have only one learning attempt and one active/pending break across all classes.
 
 ### Request a break and return
 
@@ -75,8 +92,8 @@ Choose **I'm a teacher** on the main sign-in page. Teacher accounts are created 
 
 | Page | Teacher controls |
 | --- | --- |
-| Overview | Live classroom activity, capacity, queues, daily statistics, and **Pending Student Approvals** across the teacher's classes, oldest registration first |
-| Class Roster | Create, edit, archive, and restore classes; manage enrollment codes, periods, timezones, students, and account statuses |
+| Overview | Live classroom activity, capacity, queues, daily statistics, and **Pending Student Approvals** across the teacher's classes, oldest enrollment request first |
+| Class Roster | Create, edit, archive, and restore classes; manage enrollment codes, periods, timezones, start/end times, students, and enrollment statuses |
 | Question bank | Add, edit, pause, activate, or remove biology questions for the selected class |
 | Trip history | Review departures, returns, and purposes; filter activity, export CSV, correct false returns, or open **Rule Offenders** |
 | Report Problems | Submit a name, contact email, and problem description to the developer |
@@ -86,11 +103,11 @@ Choose **I'm a teacher** on the main sign-in page. Teacher accounts are created 
 
 Each teacher can manage multiple class periods. Active enrollment codes must be unique across the application. Editing a class name, period, timezone, or code preserves its roster and history. Archiving stops new enrollment and break requests while keeping records available; students already outside can still return.
 
-Approve registered Pending students from **Overview → Pending Student Approvals** or their class roster. The pending panel includes a count, name, username, class/period, and registration date. Approval records the responsible teacher and timestamp, removes the student from the pending list, and enables break access when the student's dashboard refreshes. Teachers can manage only students in their own classes.
+Approve registered Pending students from **Overview → Pending Student Approvals** or their class roster. The pending panel includes a count, name, username, class/period, and registration date. Approval records the responsible teacher and timestamp, removes the student from the pending list, and enables break access when the student's dashboard refreshes. Approval is specific to the indicated class. Teachers can manage only enrollments and activity in their own classes; shared students' unrelated records remain private.
 
-Roster actions also support adding names before registration, viewing student records, resetting passwords, transferring students between the teacher's classes, and removing enrollment. Transfers and removals preserve the account and historical class attribution; an open trip is completed or its reservation cancelled. A removed student who self-enrolls with a new class code requires that class teacher's approval.
+Roster actions also support creating a separate roster account with a server-assigned username (set a temporary password before approving, then give that username/password privately to the student), viewing student records, resetting passwords, transferring students between the teacher's classes, and removing enrollment. Transfers and removals preserve the account and historical class attribution; an open trip is completed or its reservation cancelled. A removed student who self-enrolls with a new class code requires that class teacher's approval.
 
-Deactivating a student cancels learning and waiting/reserved requests while preserving any outside break and its timer. The student can still sign in and record a real return; the teacher can also reconcile the active trip. Deactivation and reactivation require confirmation.
+Deactivating an enrollment cancels that class’s learning and waiting/reserved requests while preserving any outside break and its timer. The student can still sign in and record a real return; the teacher can also reconcile the active trip. Deactivation and reactivation require confirmation and never alter other enrollments or clear account-wide suspension. Password resets affect the permanent account and all its sessions; share temporary passwords privately.
 
 **Account Settings** contains only account security. Class names, codes, timezones, and the fixed two-space capacity information remain accessible through **Class Roster**.
 
@@ -139,7 +156,7 @@ Problem reporting stores tickets in the app. Email sending, ticket replies, and 
 
 1. Sign in to your authorized GitHub account and open this repository on **main**.
 2. Select **Code → Codespaces → Create codespace on main**. Wait for setup to finish.
-3. Setup automatically installs dependencies, creates an ignored local configuration, initializes an isolated PostgreSQL-compatible PGlite database in **.local/data**, applies local migrations, and creates the demo teacher, Active student, class **DEMO1**, enrollment, and biology question bank.
+3. Setup automatically installs dependencies, creates an ignored local configuration, initializes an isolated PostgreSQL-compatible PGlite database in **.local/data**, applies local migrations, and creates the demo teacher, Active student, both scheduled classes **DEMO1 / DEMO2**, Approved test enrollments, and question banks.
 4. If your Codespace has the private Developer provisioning secret described below, setup also creates the single development Developer account automatically. Without it, student and teacher demos still work and setup explains how to enable Developer access.
 5. In the terminal, run:
 
@@ -155,7 +172,7 @@ Problem reporting stores tickets in the app. Email sending, ticket replies, and 
    | Student | `teststudent` | `1234567890` | Active |
    | Teacher | `teachertest` | `1234567890` | Active |
 
-The student belongs to the demo teacher’s **Demo Biology** class and needs no registration or approval. The teacher can view that student in **Class Roster**. Newly registered students still require teacher approval. No public demo autofill buttons are included.
+The student is approved in both scheduled demo classes and needs no registration or approval. Breaks are available only during an approved class session; outside school hours the dashboard correctly shows no eligible session. The teacher can view that student in **Class Roster**. New students register first, join classes from My Classes, and require each class teacher’s approval. No public demo autofill buttons are included.
 
 ### Private Developer password: configure once for each authorized tester
 
@@ -195,7 +212,7 @@ For an older Codespace, stop the server and run `git pull --ff-only origin main`
 | Demo accounts missing or incorrect-credentials error | Confirm this Codespace uses current **main**, stop the server, run `npm run dev:setup`, then `npm run dev:check`. Setup failures are shown and prevent an unusable dev server from starting |
 | Developer secret missing | Configure a private **Codespaces** secret as above, stop and restart the Codespace, then run `npm run dev`; student/teacher demos remain available without it |
 | Developer secret differs from saved password | Use the account’s current password or correct the secret. Setup never resets existing passwords |
-| Student Pending or Deactivated | New non-demo registrations require approval. A fresh `teststudent` is Active; deliberate later status changes are preserved and must be managed by its teacher |
+| Student Pending or Deactivated | New non-demo class enrollments require approval. A fresh `teststudent` is Active; deliberate later status changes are preserved and must be managed by its teacher |
 | Local database already open | Stop the other WaterCycle server or script before setup/check commands. A post-start hook preserves a database already held by a running server |
 | Database migration/configuration error | Follow the specific terminal error. Preserve `.local/data`; never delete it to fix login. Managed database URLs are refused in Codespaces |
 | Prior local administrator uses a different username | Preserve that database and its existing access. For the required fresh accounts, choose a new ignored `LOCAL_DATABASE_PATH` and run setup; no administrator is renamed or added to an existing database |
@@ -206,7 +223,7 @@ Initialization is repeatable: it adds missing accounts without duplicating class
 
 Follow the steps above in a new checkout. Each checkout has an independent ignored database: existing accounts, sessions, and private environment settings do not clone with Git. Local development and production may use the same Developer username, but authenticate against separate databases and separately configured password hashes. Source access and local Developer access do not grant access to production records. Codespaces refuse managed connections, and Production/Preview still require their protected, separate managed PostgreSQL configurations.
 
-Legacy testing fixtures remain available: teachers `morganreed` / `mariamiller` use initial password `WaterCycle2026!`; students such as `jamiechen`, `alexrivera`, and `sampatel` use `Biology2026!`. Their four sample classes remain alongside `DEMO1`. Previously changed passwords remain unchanged.
+Legacy testing fixtures remain available: teachers `morganreed` / `mariamiller` use initial password `WaterCycle2026!`; students such as `jamiechen`, `alexrivera`, and `sampatel` use `Biology2026!`. Their four sample classes remain alongside `DEMO1` and `DEMO2`. Previously changed passwords remain unchanged.
 
 ## Deploy to Vercel with persistent data
 
@@ -218,7 +235,11 @@ Vercel runs `npm ci` and `npm run build`; its local filesystem is not persistent
 
 ## Existing data and migrations
 
-Schema migrations run transactionally and are versioned. Managed databases require explicit migration and environment binding; local development still initializes automatically. Migration 5 adds environment identity and migration audit tables without rewriting classroom records. Existing active student accounts remain Active; previously disabled students become Deactivated. Accounts, enrollment, passwords, biology activities, sessions, and historical trips are preserved. New registration and roster claims default to Pending.
+Schema migrations run transactionally and are versioned. Managed databases require explicit migration and environment binding; local development initializes automatically. Migration 5 retains environment identity and migration auditing. **Migration 6** removes the one-active-class constraint, adds class-specific Pending/Approved/Deactivated status and approval metadata, adds nullable start/end times and extensible weekday arrays, records session cancellation explanations, and adds an atomic username high-water-mark table.
+
+Migration 6 retains account IDs, usernames, password hashes, all existing columns, memberships, historical trips/violations, sessions, questions/learning, audits, and problem reports. Existing enrollment approval states are copied from the legacy account fields. Approval metadata is copied only to the matching current class, and historical audits remain unchanged. Inactive/deactivated memberships stay deactivated. Legacy disabled accounts are conservatively retained as account-wide suspended, separately from enrollments; approving one class cannot clear that restriction. Legacy status fields remain stored for audit compatibility. Unscheduled classes remain unscheduled, and active outside trips can still return. No reset, truncation, or demo seed is part of this migration.
+
+**Production rollout:** verify a backup, review migration 6, pause classroom writes for the migration/code cutover, and run the operator procedure in [the production guide](docs/production-database.md). For a reviewed version-5 database use `npm run db:migrate -- --expected-version 5 --backup-reference YOUR_VERIFIED_BACKUP_ID`. Grant the restricted runtime role `SELECT, INSERT, UPDATE` on `public.student_username_counters`, deploy the matching code, and have each teacher set times on existing classes. Production startup never applies this migration automatically. Existing users keep their accounts and passwords; they do not register again.
 
 The earlier class migration retained invalid legacy codes as `legacy_code`. Teachers must choose a valid five-character replacement in **Class Roster** before reopening enrollment. Ownership migration stops if an original class has missing or ambiguous teacher ownership. Historical trips retain their timestamps and show **Not recorded** where purpose was not previously collected; missing violation timestamps are not invented. Legacy learning attempts retired by the earlier break-workflow migration remain stored.
 
@@ -236,9 +257,11 @@ npm run test:fresh
 npm run test:fresh:container
 ```
 
-Automated coverage includes account approval and migration preservation, current-status enforcement, role/class ownership, teacher and developer authentication, password changes, class codes, roster actions, biology learning and retry protection, tutorials, FIFO/reservation concurrency, timers and warnings, Rule Offenders, return corrections and paused-capacity recovery, report validation and failed-form recovery, and developer ticket search, pagination, and status history.
+Automated coverage includes concurrent sequential usernames, multiple teachers/enrollments, schedule boundaries/DST, session closure, cross-class break exclusion, account approval and migration preservation, current-status enforcement, role/class ownership, teacher and developer authentication, password changes, class codes, roster actions, biology learning and retry protection, tutorials, FIFO/reservation concurrency, timers and warnings, Rule Offenders, return corrections and paused-capacity recovery, report validation and failed-form recovery, and developer ticket search, pagination, and status history.
 
 The PostgreSQL persistence suite creates its own disposable Docker server, verifies repeated application/production-server restarts, and exercises an actual backup/restore. It never uses your `DATABASE_URL`. Docker and OpenSSL are required; run the production build first.
+
+Browser/fresh-development tests preload a test-only server/database clock with one shared offset to a Monday school morning, so schedule-dependent scenarios remain reproducible at night and on weekends. Time advances normally across restarts. `npm run dev`, Codespaces setup, and Vercel never import this test fixture. Backend schedule tests separately cover real IANA offsets, weekends, DST, and exact boundaries.
 
 `npm run test:fresh` checks committed source in a separate temporary Git clone with its own dependency installation, environment, database, and HTTP server. It verifies exact demo logins, enrollment, breaks, automatic private-secret Developer access, repeated setup, preserved changed credentials/status/history, and secret-present and secret-absent setup, late secret injection, and rejected production settings. Commit your changes before running it; it does not test uncommitted edits.
 

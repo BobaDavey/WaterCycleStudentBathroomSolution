@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import {continueRegistration,joinClass,scheduleClassForm} from './enrollment-helpers';
+import { test, expect, type Page } from './fixtures';
 import type { AdminState, StudentState, TeacherState } from '../../src/lib/contracts';
 import { qualifyBreak } from './break-helpers';
 
@@ -26,12 +27,9 @@ async function signup(page: Page, firstName: string, lastName: string, code: str
   await page.getByRole('button', { name: /Create a student account/ }).click();
   await page.getByLabel('First name', { exact: true }).fill(firstName);
   await page.getByLabel('Last name', { exact: true }).fill(lastName);
-  await page.getByLabel('Classroom code', { exact: true }).fill(code);
-  await expect(page.getByLabel('Classroom code', { exact: true })).toHaveValue(code.toUpperCase());
   await page.getByLabel('Password', { exact: true }).fill('PrivateStudent2026!');
   await page.getByRole('button', { name: 'Create my account' }).click();
-  await expect(page.getByRole('heading', { name: new RegExp(`Hey, ${firstName}`) })).toBeVisible();
-  await page.getByRole('button', { name: "Got It! Let's Go", exact: true }).click();
+  await continueRegistration(page);await joinClass(page,code);
 }
 
 test('teacher class overview, leading-zero enrollment, duplicate errors, transfer, removal, and archived return', async ({ browser }) => {
@@ -52,7 +50,7 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await dialog.getByLabel('Class period', { exact: true }).fill('9');
     await dialog.getByLabel('Enrollment code', { exact: true }).fill('bio09');
     await expect(dialog.getByLabel('Enrollment code', { exact: true })).toHaveValue('BIO09');
-    await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
+    await scheduleClassForm(teacher);await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
     await expect(dialog).not.toBeVisible();
     let card = teacher.getByRole('article').filter({ has: teacher.getByRole('heading', { name: 'Biology browser class', exact: true }) });
     await expect(card.getByText('BIO09', { exact: true })).toBeVisible();
@@ -60,7 +58,7 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     dialog = teacher.getByRole('dialog');
     await dialog.getByLabel('Class name', { exact: true }).fill('Duplicate code test');
     await dialog.getByLabel('Enrollment code', { exact: true }).fill('bIo09');
-    await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
+    await scheduleClassForm(teacher);await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText(/code|use|unique/i);
     await dialog.getByRole('button', { name: 'Close dialog' }).click();
     await card.getByRole('button', { name: 'Edit Class', exact: true }).click();
@@ -72,14 +70,14 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await expect(card.getByText('BIO10', { exact: true })).toBeVisible();
     const surname = `Enrollment${Date.now()}`;
     await signup(student, 'Robin', surname, 'bio10');
-    const username = `robin${surname}`.toLowerCase();
+    const username = `robin${surname}01`.toLowerCase();
     let studentState = await (await student.request.get('/api/student/state')).json() as StudentState;
     expect(studentState.classroom?.code).toBe('BIO10');
     await card.getByRole('button', { name: 'View Class', exact: true }).click();
     const row = teacher.getByRole('row').filter({ hasText: username });
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: 'Approve', exact: true }).click();
-    await expect(row.getByText('Active', { exact: true })).toBeVisible();
+    await expect(row.getByText('Approved', { exact: true })).toBeVisible();
     await row.getByRole('button', { name: 'Transfer', exact: true }).click();
     dialog = teacher.getByRole('dialog');
     const state = await (await teacher.request.get('/api/teacher/state')).json() as TeacherState;
@@ -92,15 +90,13 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await row.getByRole('button', { name: 'Remove', exact: true }).click();
     await teacher.getByRole('dialog').getByRole('button', { name: 'Remove from class', exact: true }).click();
     await expect(row).not.toBeVisible();
-    await expect(student.getByRole('button', { name: /Join class/i })).toBeVisible();
-    await student.getByLabel('Class enrollment code', { exact: true }).fill('bio10');
-    await student.getByRole('button', { name: /Join class/i }).click();
+    await joinClass(student,'bio10');
     await expect(student.getByRole('button', { name: 'Request a Break', exact: true })).toBeVisible();
     studentState = await (await student.request.get('/api/student/state')).json() as StudentState;
     const target = studentState.classroom!;
-    expect(studentState.user.accountStatus).toBe('pending');
+    expect(studentState.enrollments[0].status).toBe('pending');
     expect((await teacher.request.patch(`/api/teacher/roster/${studentState.user.id}`, { headers, data: { accountStatus: 'active' } })).ok()).toBe(true);
-    await expect(student.getByText('Your account is awaiting teacher approval.', { exact: true })).toHaveCount(0);
+    await expect(student.getByText('Waiting for Teacher Approval.', { exact: true })).toHaveCount(0);
     const questions = (await (await teacher.request.get(`/api/teacher/state?classroomId=${target.id}`)).json() as TeacherState).questions;
     await qualifyBreak(student, questions, 'water');
     await teacher.getByRole('button', { name: 'Back to Class Roster' }).click();
@@ -110,13 +106,13 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await expect(card).toBeVisible();
     await expect(student.getByRole('button', { name: "I'm Back", exact: true })).toBeVisible();
     await student.getByRole('button', { name: "I'm Back", exact: true }).click();
-    await expect(student.getByRole('button', { name: 'Request a Break', exact: true })).toBeDisabled();
+    await student.getByRole('button',{name:'Request a Break',exact:true}).click();await expect(student.getByRole('dialog',{name:'No Eligible Class in Session',exact:true})).toBeVisible();await student.getByRole('button',{name:'Got It',exact:true}).click();
     const returned = await (await student.request.get('/api/student/state')).json() as StudentState;
     expect(returned.recentVisits[0].classroomId).toBe(target.id);
     expect(returned.recentVisits[0].returnedAt).toBeTruthy();
     expect(returned.recentVisits[0].purpose).toBe('water');
-    const rejected = await teacher.request.post('/api/auth/signup', { headers, data: { firstName: 'Not', lastName: `Enrolled${Date.now()}`, password: 'Student2026!', classroomCode: 'bio10' } });
-    expect(rejected.status()).toBe(400);
+    const rejected = await teacher.request.post('/api/student/enroll', { headers, data: { classroomCode: 'bio10' } });
+    expect(rejected.status()).toBe(403);
   } finally { await teacherContext.close(); await studentContext.close(); }
 });
 
@@ -159,7 +155,7 @@ test('sole admin creates and deactivates a teacher; temporary password gate and 
     await dialog.getByLabel('Class name', { exact: true }).fill('Teacher-created biology');
     await dialog.getByLabel('Class period', { exact: true }).fill('10');
     await dialog.getByLabel('Enrollment code', { exact: true }).fill('00010');
-    await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
+    await scheduleClassForm(teacher);await dialog.getByRole('button', { name: 'Create Class', exact: true }).click();
     await expect(teacher.getByRole('article').filter({ hasText: '00010' })).toBeVisible();
     await teacherRow.getByRole('button', { name: 'View teacher', exact: true }).click();
     await expect(admin.getByRole('heading', { name: 'Teacher-created biology', exact: true })).toBeVisible();

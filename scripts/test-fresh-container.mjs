@@ -46,7 +46,7 @@ try{
  const config=JSON.parse(await readFile(path.join(checkout,'.devcontainer/devcontainer.json'),'utf8'));
  await command('git',['-C',checkout,'archive','--format=tar','--output='+path.join(root,'source.tar'),'HEAD']);
  // The private value goes only into an ephemeral mode-0600 Docker env file.
- const environment={...config.containerEnv,CODESPACES:'true',NEXT_TELEMETRY_DISABLED:'1',ADMIN_INITIAL_PASSWORD:password};
+ const environment={...config.containerEnv,NODE_OPTIONS:'--import=/app/tests/school-day-clock.mjs',WATERCYCLE_TEST_CLOCK_OFFSET_MS:String(Date.parse('2026-07-06T12:30:00Z')-Date.now()),CODESPACES:'true',NEXT_TELEMETRY_DISABLED:'1',ADMIN_INITIAL_PASSWORD:password};
  const ca=process.env.WATERCYCLE_FRESH_CA_FILE||process.env.NODE_EXTRA_CA_CERTS;
  if(ca)environment.NODE_EXTRA_CA_CERTS='/tmp/fixture-ca.crt';
  await writeFile(path.join(root,'container.env'),Object.entries(environment).map(([key,value])=>`${key}=${value}`).join('\n')+'\n',{mode:0o600});
@@ -79,11 +79,11 @@ try{
     if(role==='admin')await page.waitForURL(/\/admin\/dashboard$/);
     await page.getByRole('button',{name:'Sign out',exact:true}).waitFor();
    }
-   const teacherState=await(await api(teacherContext,'teacher/state')).json();
    const studentState=await(await api(studentContext,'student/state')).json();
-   assert.equal(studentState.user.accountStatus,'active');assert.equal(studentState.classroom.code,'DEMO1');
+   const teacherState=await(await api(teacherContext,'teacher/state?classroomId='+studentState.classroom.id)).json();
+   assert.equal(studentState.user.accountStatus,'active');assert.deepEqual(teacherState.classes.map(c=>[c.code,c.name,c.timeZone,c.startTime,c.endTime,c.scheduleDays]).sort((a,b)=>a[0].localeCompare(b[0])),[['DEMO1','Demo Biology Morning','America/New_York','07:00','13:00',[1,2,3,4,5]],['DEMO2','Demo Chemistry Afternoon','America/New_York','13:00','18:00',[1,2,3,4,5]]]);assert.ok(teacherState.classes.every(c=>c.teacherId===teacherState.user.id));assert.deepEqual(studentState.enrollments.map(e=>e.classroom.code).sort(),['DEMO1','DEMO2']);assert.ok(studentState.enrollments.every(e=>e.status==='approved'));
    assert.equal(teacherState.classroom.id,studentState.classroom.id);assert.ok(teacherState.students.some(s=>s.id===studentState.user.id&&s.accountStatus==='active'));
-   const teacher=teacherContext.pages()[0];await teacher.getByRole('button',{name:'Class Roster',exact:true}).click();await teacher.getByRole('button',{name:'View Class',exact:true}).click();
+   const teacher=teacherContext.pages()[0];await teacher.getByRole('button',{name:'Class Roster',exact:true}).click();await teacher.getByRole('article').filter({hasText:studentState.classroom.code}).getByRole('button',{name:'View Class',exact:true}).click();
    await teacher.getByRole('row').filter({hasText:'teststudent'}).waitFor();
    assert.equal((await api(teacherContext,'admin/state')).status(),403);assert.equal((await api(studentContext,'admin/state')).status(),403);
    const adminState=await(await api(adminContext,'admin/state')).json();assert.equal(adminState.user.username,'davidanzezhang');

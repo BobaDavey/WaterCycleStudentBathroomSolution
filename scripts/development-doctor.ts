@@ -28,10 +28,13 @@ async function main(){
    const {rows:[account]}=await db.query<Record<string,unknown>>('SELECT * FROM users WHERE username=$1 AND role=$2',[username,role]);
    if(!account)throw new Error(`Demo account ${username} not initialized. Run npm run dev:setup.`);
    if(!await verifyPassword('1234567890',account.password_hash as string|null))throw new Error(`The local ${username} password has changed. Setup preserves it; use the changed password or choose a new LOCAL_DATABASE_PATH for a fresh demo.`);
-   if(!account.enabled||role==='student'&&account.account_status!=='active')throw new Error(`Local ${username} is ${role==='student'&&account.account_status==='pending'?'pending teacher approval':'deactivated'}. Sign in as its teacher to approve/reactivate; setup preserves status changes.`);
+   if(role==='teacher'&&!account.enabled||role==='student'&&account.account_suspended)throw new Error(`Local ${username} has an account-wide restriction. Contact its administrator; class approval cannot clear an account suspension. Setup preserves status changes.`);
   }
-  const {rows:[enrollment]}=await db.query<{n:number}>(`SELECT COUNT(*)::int AS n FROM users s JOIN enrollments e ON e.student_id=s.id AND e.active=TRUE JOIN classrooms c ON c.id=e.classroom_id AND c.id=s.classroom_id JOIN users t ON t.id=c.teacher_id WHERE s.username='teststudent' AND t.username='teachertest' AND t.enabled=TRUE AND c.archived=FALSE`);
-  if(enrollment.n!==1)throw new Error('Demo enrollment or class changed. Review Class Roster as teachertest; setup never undoes transfers or removals.');
+  const {rows:[enrollment]}=await db.query<{n:number}>(`SELECT COUNT(*)::int AS n FROM users s JOIN enrollments e ON e.student_id=s.id AND e.active=TRUE JOIN classrooms c ON c.id=e.classroom_id AND e.status='approved' JOIN users t ON t.id=c.teacher_id WHERE s.username='teststudent' AND t.username='teachertest' AND t.enabled=TRUE AND c.archived=FALSE`);
+  if(enrollment.n!==2)throw new Error('A demo enrollment is missing, Pending, Deactivated, transferred, or removed. Review both classes in Class Roster as teachertest; setup preserves intentional enrollment changes.');
+  const {rows:demoClasses}=await db.query("SELECT c.name,c.code,c.start_time,c.end_time FROM classrooms c JOIN users t ON t.id=c.teacher_id WHERE t.username='teachertest' AND c.archived=FALSE AND c.code IN ('DEMO1','DEMO2') ORDER BY c.code");
+  if(demoClasses.length!==2)throw new Error('One of the two demo classes was changed or removed. Setup preserves edits. Review Class Roster or use a new LOCAL_DATABASE_PATH for the fresh two-class demo.');
+  console.log('PASS: both demo classes exist; their saved schedules are preserved. Break eligibility uses their weekday/time-zone schedules.');
   console.log('PASS: isolated local database, current migrations, both demo passwords, Active student/teacher, and correct class enrollment.');
   const {rows:[admin]}=await db.query<Record<string,unknown>>("SELECT * FROM users WHERE role='admin'");
   const secret=developmentAdminSecret(process.env);
