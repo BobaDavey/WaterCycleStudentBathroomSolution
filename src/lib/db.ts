@@ -5,19 +5,24 @@ import path from "node:path";
 import { lockLocalDatabase } from './local-database-lock';
 import { migrateDatabase } from './migrations';
 import { bootstrapAdministrator } from './bootstrap-admin';
+import { DatabaseConfigurationError, assertLocalDatabaseAllowed, hosted, managedConfiguration, validatePostgresUrl, type DatabaseBinding } from './database-policy';
+import { applyManagedMigrations, initializationLock, verifyRuntimeDatabase } from './managed-database';
 
 export interface SQL { query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>; }
 export interface Database extends SQL { transaction<T>(fn: (tx: SQL) => Promise<T>): Promise<T>; close(): Promise<void>; }
 
-export async function createDatabase(options: { url?: string; directory?: string; bootstrapAdmin?: boolean } = {}): Promise<Database> {
+export async function createDatabase(options: { url?: string; directory?: string; bootstrapAdmin?: boolean; binding?: DatabaseBinding; operator?: boolean; migration?: {expectedVersion:number;backupReference?:string} } = {}): Promise<Database> {
  if (options.url) {
-  const pool = new Pool({ connectionString: options.url, max: 4, idleTimeoutMillis: 20000, connectionTimeoutMillis: 15000 });
+  if(!options.binding)throw new Error('Managed database connections require an explicit environment and database identity.');
+  validatePostgresUrl(options.url,hosted(process.env));
+  const pool = new Pool({ connectionString: options.url, options:'-c search_path=public', max: 4, idleTimeoutMillis: 20000, connectionTimeoutMillis: 15000 });
   try {
    const setup = await pool.connect();
    try {
-    await setup.query('BEGIN');
-    await setup.query('SELECT pg_advisory_xact_lock(874103921)');
-    await migrateDatabase({ async query<T>(sql: string, params: unknown[] = []) { const result=await setup.query(sql,params); return {rows:result.rows as T[]}; } }, async sql=>{ await setup.query(sql); });
+    await setup.query(options.migration?'BEGIN':'BEGIN READ ONLY');
+    const tx:SQL={async query<T>(sql:string,params:unknown[]=[]){const result=await setup.query(sql,params);return{rows:result.rows as T[]};}};
+    if(options.migration){await setup.query('SELECT pg_advisory_xact_lock($1)',[initializationLock]);await applyManagedMigrations(tx,options.binding!,options.migration);}
+    else await verifyRuntimeDatabase(tx,options.binding!,options.operator===true);
     await setup.query('COMMIT');
    } catch (error) { await setup.query('ROLLBACK').catch(()=>{}); throw error; }
    finally { setup.release(); }
@@ -31,10 +36,9 @@ export async function createDatabase(options: { url?: string; directory?: string
    },
    async close() { await pool.end(); }
   };
-  try { if (options.bootstrapAdmin !== false && process.env.ADMIN_INITIAL_PASSWORD) await bootstrapAdministrator(database, process.env.ADMIN_INITIAL_PASSWORD); }
-  catch (error) { await database.close(); throw error; }
   return database;
  }
+ assertLocalDatabaseAllowed(process.env);
  const directory = options.directory ?? path.join(process.cwd(), '.local', 'data');
  if (directory !== 'memory://') await mkdir(directory, { recursive: true });
  const release = directory === 'memory://' ? async () => {} : await lockLocalDatabase(directory);
@@ -67,10 +71,14 @@ export async function createDatabase(options: { url?: string; directory?: string
 declare global { var watercycleDatabase: Promise<Database> | undefined; }
 export function getDatabase(): Promise<Database> {
  if (!globalThis.watercycleDatabase) {
-  if (!process.env.DATABASE_URL && process.env.NODE_ENV === 'production' && process.env.LOCAL_DATABASE !== 'true') {
-   throw new Error('DATABASE_URL must be configured for production. Use a PostgreSQL database from your Vercel project.');
+  if(process.env.MIGRATION_DATABASE_URL&&!process.env.DATABASE_URL)throw new DatabaseConfigurationError('DATABASE_URL is required for the application. Maintenance credentials never enable local fallback or substitute for runtime credentials.');
+  let options:Parameters<typeof createDatabase>[0];
+  if(hosted(process.env)||process.env.DATABASE_URL){const config=managedConfiguration(process.env);options={url:config.url,binding:config.binding,bootstrapAdmin:false};}
+  else {
+   if(process.env.NODE_ENV==='production'&&process.env.LOCAL_DATABASE!=='true')throw new Error('DATABASE_URL is required for production. No local database was opened.');
+   options={directory:process.env.LOCAL_DATABASE_PATH};
   }
-  globalThis.watercycleDatabase = createDatabase({ url: process.env.DATABASE_URL, directory: process.env.LOCAL_DATABASE_PATH }).catch(error => { globalThis.watercycleDatabase = undefined; throw error; });
+  globalThis.watercycleDatabase=createDatabase(options).catch(error=>{globalThis.watercycleDatabase=undefined;throw error;});
  }
  return globalThis.watercycleDatabase;
 }

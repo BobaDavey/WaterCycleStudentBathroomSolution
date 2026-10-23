@@ -1,6 +1,8 @@
 import { spawnSync } from 'node:child_process';
 
-if (process.env.DATABASE_URL) {
+if (process.env.VERCEL === '1' || ['production','preview'].includes(process.env.WATERCYCLE_ENVIRONMENT) || process.env.MIGRATION_DATABASE_URL) {
+  console.log('Hosted or managed maintenance environment detected; local demo setup skipped.');
+} else if (process.env.DATABASE_URL) {
   console.log('Existing PostgreSQL configuration preserved; local demo seed skipped.');
 } else if (process.env.LOCAL_DATABASE === 'true' && process.env.DEMO_MODE === 'true') {
   const result = spawnSync('npm', ['run', 'db:seed'], { stdio: 'inherit' });

@@ -30,6 +30,7 @@ async function handle(request:NextRequest, context:Context) {
   const route=path.join('/'); const method=request.method;
   if(route==='auth/setup')throw new AppError(410,'Teacher accounts are created by the administrator. Public teacher registration is unavailable.');
   const db=await getDatabase();const app=new WaterCycle(db);const token=request.cookies.get(cookieName)?.value;
+  if(route==='health'&&method==='GET'){await db.query('SELECT 1');return NextResponse.json({ok:true});}
   let user=await sessionUser(db,token);
   const classroomId=request.nextUrl.searchParams.get('classroomId') || undefined;
   async function json() {const text=await request.text();if(text.length>32768)throw new AppError(413,'This request is too large.');try{return JSON.parse(text || '{}');}catch{throw new AppError(400,'Please send valid JSON.');}}

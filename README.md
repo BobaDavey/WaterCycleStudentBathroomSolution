@@ -181,19 +181,17 @@ The seed creates two teachers, four classes, 18 approved sample students, biolog
 
 Local PGlite data lives in ignored **`.local/data`**. Stop the app before running a seed or administrator bootstrap command against that directory. Separate running instances need separate `LOCAL_DATABASE_PATH` values. See [local database safety](docs/local-database.md).
 
-## Deploy to Vercel
+## Deploy to Vercel with persistent data
 
-1. Import this repository as a **Next.js** project, using the repository root and `npm run build`.
-2. Connect managed PostgreSQL, such as Neon, and set **`DATABASE_URL`** privately. Preserve the provider's TLS settings and use its pooled connection URL when available.
-3. Keep `LOCAL_DATABASE` and `DEMO_MODE` disabled.
-4. Deploy the application.
-5. Create teacher accounts. Teachers change their temporary passwords, create classes and enrollment codes, and approve newly registered students.
+Follow the [production database and recovery guide](docs/production-database.md) before classroom use. Production and Preview require separate managed PostgreSQL databases, separately scoped Vercel variables, and distinct database identities. Runtime database credentials cannot own tables, change schemas, truncate, or hard-delete classroom records.
 
-Vercel's local filesystem is not persistent storage; a shared deployment requires PostgreSQL. Updating this repository does not itself publish a Vercel deployment.
+Builds and server startup never migrate or seed a managed database. Reviewed migrations run through a separate operator command with a verified backup reference and expected schema version. Redeployments reconnect to the same persistent database and preserve existing accounts, passwords, sessions, rosters, activities, trips, and problem reports. An empty, incompatible, or incorrectly scoped database is refused rather than initialized automatically.
+
+Vercel runs `npm ci` and `npm run build`; its local filesystem is not persistent storage. This repository update does not itself create a managed database, configure Vercel, or publish a deployment.
 
 ## Existing data and migrations
 
-Schema migrations run transactionally and are versioned. Existing active student accounts remain Active; previously disabled students become Deactivated. Accounts, enrollment, passwords, biology activities, sessions, and historical trips are preserved. New registration and roster claims default to Pending.
+Schema migrations run transactionally and are versioned. Managed databases require explicit migration and environment binding; local development still initializes automatically. Migration 5 adds environment identity and migration audit tables without rewriting classroom records. Existing active student accounts remain Active; previously disabled students become Deactivated. Accounts, enrollment, passwords, biology activities, sessions, and historical trips are preserved. New registration and roster claims default to Pending.
 
 The earlier class migration retained invalid legacy codes as `legacy_code`. Teachers must choose a valid five-character replacement in **Class Roster** before reopening enrollment. Ownership migration stops if an original class has missing or ambiguous teacher ownership. Historical trips retain their timestamps and show **Not recorded** where purpose was not previously collected; missing violation timestamps are not invented. Legacy learning attempts retired by the earlier break-workflow migration remain stored.
 
@@ -206,9 +204,12 @@ npm run typecheck
 npm test
 npm run test:e2e
 npm run build
+npm run test:postgres
 ```
 
 Automated coverage includes account approval and migration preservation, current-status enforcement, role/class ownership, teacher and developer authentication, password changes, class codes, roster actions, biology learning and retry protection, tutorials, FIFO/reservation concurrency, timers and warnings, Rule Offenders, return corrections and paused-capacity recovery, report validation and failed-form recovery, and developer ticket search, pagination, and status history.
+
+The PostgreSQL persistence suite creates its own disposable Docker server, verifies repeated application/production-server restarts, and exercises an actual backup/restore. It never uses your `DATABASE_URL`. Docker and OpenSSL are required; run the production build first.
 
 Browser tests recreate only **`.local/e2e-data`**. They use a generated test administrator secret and do not reset the application database. Chromium at `/usr/bin/chromium` is used when available; otherwise run `npx playwright install chromium` or set `CHROMIUM_PATH`.
 

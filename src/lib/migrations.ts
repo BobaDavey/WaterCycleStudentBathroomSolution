@@ -152,25 +152,31 @@ CREATE TABLE problem_report_events (
 CREATE INDEX problem_report_events_report ON problem_report_events(report_id,changed_at,id);
 `;
 
+export const migrations = [
+ {version:1,sql:multiTeacherMigration},
+ {version:2,sql:studentBreakMigration},
+ {version:3,sql:`ALTER TABLE classrooms ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'America/New_York';
+CREATE INDEX visits_departure_reporting ON visits(classroom_id,left_at DESC,id DESC) WHERE left_at IS NOT NULL;`},
+ {version:4,sql:approvalAndSupportMigration},
+ {version:5,sql:`CREATE TABLE watercycle_database_identity (
+ singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK(singleton=TRUE),
+ environment TEXT NOT NULL CHECK(environment IN ('production','preview','development')),
+ database_id UUID NOT NULL UNIQUE, bound_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
+);
+CREATE TABLE watercycle_migration_runs (
+ id UUID PRIMARY KEY, environment TEXT NOT NULL, database_id UUID NOT NULL, backup_reference TEXT NOT NULL,
+ versions_before INTEGER[] NOT NULL, versions_after INTEGER[] NOT NULL, completed_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
+);`},
+] as const;
+export const latestMigrationVersion = migrations.at(-1)!.version;
 /** Caller holds the PostgreSQL initialization lock and transaction. */
 export async function migrateDatabase(tx: SQL, execute: (sql:string) => Promise<void>): Promise<void> {
  await execute(baselineSchema);
- const { rows } = await tx.query<{ version: number }>('SELECT version FROM watercycle_migrations');
- if (!rows.some(row => Number(row.version) === 1)) {
-  await execute(multiTeacherMigration);
-  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(1)');
- }
- if (!rows.some(row => Number(row.version) === 2)) {
-  await execute(studentBreakMigration);
-  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(2)');
- }
- if (!rows.some(row => Number(row.version) === 3)) {
-  await execute(`ALTER TABLE classrooms ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'America/New_York';
-CREATE INDEX visits_departure_reporting ON visits(classroom_id,left_at DESC,id DESC) WHERE left_at IS NOT NULL;`);
-  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(3)');
- }
- if (!rows.some(row => Number(row.version) === 4)) {
-  await execute(approvalAndSupportMigration);
-  await tx.query('INSERT INTO watercycle_migrations(version) VALUES(4)');
+ const {rows}=await tx.query<{version:number}>('SELECT version FROM watercycle_migrations');
+ const versions=rows.map(row=>Number(row.version)).sort((a,b)=>a-b);
+ if(versions.some((version,index)=>version!==index+1)||versions.some(version=>version>latestMigrationVersion))throw new Error('The database migration history is incompatible with this release. No migrations were applied.');
+ for(const migration of migrations)if(!versions.includes(migration.version)){
+  await execute(migration.sql);
+  await tx.query('INSERT INTO watercycle_migrations(version) VALUES($1)',[migration.version]);
  }
 }

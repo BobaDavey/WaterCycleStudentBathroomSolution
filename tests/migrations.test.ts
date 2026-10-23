@@ -39,7 +39,7 @@ test('migrates original records and ownership without replacing identities, pass
   assert.equal((await db.query<{classroom_id:string}>("SELECT classroom_id FROM quizzes WHERE id='legacy-quiz'")).rows[0].classroom_id,'legacy-class');
   assert.deepEqual((await db.query('SELECT student_id,classroom_id,active FROM enrollments')).rows,[{student_id:'legacy-student',classroom_id:'legacy-class',active:true}]);
   await migrateLegacy(db);
-  assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2},{version:3},{version:4}]);
+  assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2},{version:3},{version:4},{version:5}]);
   assert.equal((await db.query('SELECT * FROM enrollments')).rows.length,1);
   assert.equal((await db.query('SELECT * FROM visits')).rows.length,1);
   await db.query("UPDATE classrooms SET code='00123' WHERE id='legacy-class'");
@@ -125,7 +125,7 @@ test('version two preserves numeric codes, users, departures, and history while 
   await db.query("UPDATE visits SET purpose='water',warning_acknowledged_at=CURRENT_TIMESTAMP WHERE id='active-trip'");
   await db.query("INSERT INTO quizzes(id,student_id,classroom_id,questions,expires_at,purpose,correct_count,current_index,question_token,seen_question_ids,answer_history,visit_id) VALUES('new-quiz','new-student','legacy-class','[]',CURRENT_TIMESTAMP+INTERVAL '5 minutes','restroom',1,2,'presentation-token','[\"question-one\"]','[{\"correct\":true}]','active-trip')");
   await migrateLegacy(db);
-  assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2},{version:3},{version:4}]);
+  assert.deepEqual((await db.query('SELECT version FROM watercycle_migrations ORDER BY version')).rows,[{version:1},{version:2},{version:3},{version:4},{version:5}]);
   assert.deepEqual((await db.query<{ready_expires_at:Date|null}>("SELECT ready_expires_at FROM visits WHERE id='ready-trip'")).rows[0].ready_expires_at,ready.ready_expires_at);
   assert.equal((await db.query<{used:boolean}>("SELECT used FROM quizzes WHERE id='new-quiz'")).rows[0].used,false);
   assert.equal((await db.query<{tutorial_completed:boolean}>("SELECT tutorial_completed FROM users WHERE id='new-student'")).rows[0].tutorial_completed,true);
@@ -211,5 +211,16 @@ test('approval migration preserves disabled accounts as Deactivated and existing
  for(let i=0;i<before.length;i++)for(const [key,value] of Object.entries(before[i]))assert.deepEqual(after[i][key],value);
  assert.equal(after.find(row=>row.id==='disabled')?.account_status,'deactivated');assert.equal(after.find(row=>row.id==='legacy-student')?.account_status,'active');
  await db.query("UPDATE users SET account_status='pending' WHERE id='legacy-student'");await migrateLegacy(db);assert.equal((await db.query<{account_status:string}>("SELECT account_status FROM users WHERE id='legacy-student'")).rows[0].account_status,'pending');
+ }finally{await db.close();}
+});
+
+test('rejects a missing or future migration ledger version without replaying historical migrations',async()=>{
+ const {db}=await legacy();try{await migrateLegacy(db);
+ await db.query('DELETE FROM watercycle_migrations WHERE version=3');
+ const before=(await db.query('SELECT * FROM watercycle_migrations ORDER BY version')).rows;
+ await assert.rejects(()=>migrateLegacy(db),/incompatible/);
+ assert.deepEqual((await db.query('SELECT * FROM watercycle_migrations ORDER BY version')).rows,before);
+ await db.query('INSERT INTO watercycle_migrations(version) VALUES(3),(6)');
+ await assert.rejects(()=>migrateLegacy(db),/incompatible/);
  }finally{await db.close();}
 });

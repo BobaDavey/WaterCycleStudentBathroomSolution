@@ -154,3 +154,11 @@ vite.config.ts.timestamp-*
 .local/
 playwright-report/
 test-results/
+
+# Private logical database backups must stay outside Git/deployments.
+backups/
+.backups/
+*.dump
+*.backup
+*.sql.gz
+*.sql.zst

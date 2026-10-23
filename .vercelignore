@@ -13,3 +13,11 @@ node_modules/
 playwright-report/
 test-results/
 *.log
+
+# Private logical database backups must stay outside Git/deployments.
+backups/
+.backups/
+*.dump
+*.backup
+*.sql.gz
+*.sql.zst

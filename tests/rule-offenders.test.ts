@@ -6,7 +6,7 @@ import { createDatabase, type Database } from '../src/lib/db';
 import { AppError, userFrom } from '../src/lib/auth';
 import { WaterCycle, classCreateSchema } from '../src/lib/domain';
 import { bootstrapAdministrator } from '../src/lib/bootstrap-admin';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrations } from '../src/lib/migrations';
 import type { Classroom, User } from '../src/lib/contracts';
 
 let db:Database,app:WaterCycle,teacher:User,other:User,admin:User,learner:User,one:Classroom,two:Classroom,foreign:Classroom;
@@ -133,7 +133,7 @@ describe('Timestamp-derived rule offenders and private classroom reporting',()=>
     await assert.rejects(()=>app.ruleOffenders(teacher,{cursor:'invalid-cursor'}),status(400));
   });
 
-  it('validates class timezones and upgrades a version-two database without rewriting records',async()=>{
+  it('validates class timezones and applies the timezone migration without rewriting records',async()=>{
     assert.equal(classCreateSchema.safeParse({name:'Invalid',code:'REP04',timeZone:'Mars/School'}).success,false);
     await trip('preserved-history',800);
     const beforeUsers=(await db.query('SELECT * FROM users ORDER BY id')).rows;
@@ -141,7 +141,7 @@ describe('Timestamp-derived rule offenders and private classroom reporting',()=>
     await db.query('ALTER TABLE classrooms DROP COLUMN time_zone');
     await db.query('DROP INDEX visits_departure_reporting');
     await db.query('DELETE FROM watercycle_migrations WHERE version=3');
-    await db.transaction(async tx=>await migrateDatabase(tx,async sql=>{for(const statement of sql.split(';').filter(part=>part.trim()))await tx.query(statement);}));
+    await db.transaction(async tx=>{for(const statement of migrations.find(m=>m.version===3)!.sql.split(';').filter(part=>part.trim()))await tx.query(statement);await tx.query('INSERT INTO watercycle_migrations(version) VALUES(3)');});
     assert.deepEqual((await db.query('SELECT * FROM users ORDER BY id')).rows,beforeUsers);
     assert.deepEqual((await db.query('SELECT * FROM visits ORDER BY id')).rows,beforeVisits);
     assert.ok((await db.query('SELECT time_zone FROM classrooms')).rows.every(row=>row.time_zone==='America/New_York'));

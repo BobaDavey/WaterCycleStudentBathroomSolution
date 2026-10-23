@@ -1,7 +1,9 @@
+import { assertDemoSeedAllowed } from '../src/lib/database-policy';
 import path from 'node:path';
 import { createDatabase } from '../src/lib/db';
 
 async function main() {
+  assertDemoSeedAllowed(process.env);
   // This fixture is never part of Codespaces setup or production seeding.
   if(process.env.DATABASE_URL || process.env.LOCAL_DATABASE_PATH!=='.local/e2e-data' || process.env.DEMO_MODE!=='true')throw new Error('Activity fixtures require the isolated browser-test database.');
   const db=await createDatabase({directory:path.join(process.cwd(),'.local/e2e-data'),bootstrapAdmin:false});

@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { validateDeploymentBuild } from "./src/lib/database-policy";
+validateDeploymentBuild(process.env);
 const codespaceOrigin = process.env.CODESPACE_NAME
   ? `${process.env.CODESPACE_NAME}-3000.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN || "app.github.dev"}`
   : null;

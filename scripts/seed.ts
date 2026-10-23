@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createDatabase, type SQL } from '../src/lib/db';
 import { hashPassword } from '../src/lib/auth';
+import { assertDemoSeedAllowed } from '../src/lib/database-policy';
 import { defaultQuestions } from '../src/lib/default-questions';
 
 type Row = Record<string, unknown>;
 async function seed() {
- if (process.env.LOCAL_DATABASE !== 'true' || process.env.DATABASE_URL) throw new Error('Demo seeding is only allowed with LOCAL_DATABASE=true and no DATABASE_URL.');
+ assertDemoSeedAllowed(process.env);
  const db=await createDatabase({directory:process.env.LOCAL_DATABASE_PATH});
  try {
   const teacherHash=await hashPassword('WaterCycle2026!');

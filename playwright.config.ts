@@ -16,6 +16,6 @@ export default defineConfig({
     url: 'http://127.0.0.1:3100',
     timeout: 120000,
     reuseExistingServer: false,
-    env: { ADMIN_INITIAL_PASSWORD: testAdminPassword, DATABASE_URL: '', LOCAL_DATABASE: 'true', DEMO_MODE: 'true', LOCAL_DATABASE_PATH: '.local/e2e-data', NEXT_TELEMETRY_DISABLED: '1', NEXT_DIST_DIR: '.next-e2e' },
+    env: { VERCEL: '0', VERCEL_ENV: 'development', WATERCYCLE_ENVIRONMENT: 'development', WATERCYCLE_DATABASE_ID: '', MIGRATION_DATABASE_URL: '', ADMIN_INITIAL_PASSWORD: testAdminPassword, DATABASE_URL: '', LOCAL_DATABASE: 'true', DEMO_MODE: 'true', LOCAL_DATABASE_PATH: '.local/e2e-data', NEXT_TELEMETRY_DISABLED: '1', NEXT_DIST_DIR: '.next-e2e' },
   },
 });
