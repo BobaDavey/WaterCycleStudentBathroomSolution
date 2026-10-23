@@ -18,25 +18,39 @@ async function seed() {
   const demoHash=await hashPassword('1234567890');
   await db.transaction(async tx=>{
    if((await tx.query('SELECT environment FROM watercycle_database_identity')).rows.length)throw new Error('Demo seeding refuses a database bound to a managed environment. Existing accounts were preserved.');
+   // Local-only setup metadata, created only after the unbound-development
+   // checks above. Stable seed identities preserve deliberate username/code edits.
+   await tx.query('CREATE TABLE IF NOT EXISTS watercycle_development_seeds (key TEXT PRIMARY KEY,entity_id TEXT NOT NULL)');
+   async function saved(key:string,table:'users'|'classrooms'):Promise<Row|undefined> {
+    const {rows:[identity]}=await tx.query('SELECT entity_id FROM watercycle_development_seeds WHERE key=$1',[key]);
+    if(!identity)return undefined;
+    const {rows:[record]}=await tx.query(`SELECT * FROM ${table} WHERE id=$1`,[identity.entity_id]);
+    if(!record)throw new Error('A deliberately changed demo record is missing. Existing data was preserved. Use the existing database with its current accounts, or choose a new LOCAL_DATABASE_PATH for a fresh demo.');
+    return record;
+   }
+   async function remember(key:string,id:unknown){await tx.query('INSERT INTO watercycle_development_seeds(key,entity_id) VALUES($1,$2) ON CONFLICT(key) DO NOTHING',[key,id]);}
    async function teacher(first:string,last:string,username:string,hash=teacherHash) {
-    const {rows:[existing]}=await tx.query<Row>('SELECT * FROM users WHERE username=$1',[username]);
+    const existing=await saved(`teacher:${username}`,'users')??(await tx.query<Row>('SELECT * FROM users WHERE username=$1',[username])).rows[0];
     if (existing) {
      if (existing.role !== 'teacher') throw new Error('A demo teacher username is already assigned to another account. Existing data was preserved.');
-     return existing;
+     await remember(`teacher:${username}`,existing.id);return {...existing,seed_key:username};
     }
     const {rows:[created]}=await tx.query<Row>(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,enabled,account_status) VALUES($1,'teacher',$2,$3,$4,$5,NULL,TRUE,'active') RETURNING *`,[randomUUID(),first,last,username,hash]);
-    return created;
+    await remember(`teacher:${username}`,created.id);return {...created,seed_key:username};
    }
    async function classroom(owner:Row,name:string,period:string,code:string,primary=false,start='07:00',end='18:00') {
-    let row:Row|undefined;
-    if (primary && owner.classroom_id) {
+    const key=`class:${owner.seed_key}:${code}`;
+    let row=await saved(key,'classrooms');
+    if(row&&row.teacher_id!==owner.id)throw new Error('A demo class ownership changed. No ownership or records were overwritten.');
+    if (!row && primary && owner.classroom_id) {
      row=(await tx.query<Row>('SELECT * FROM classrooms WHERE id=$1 AND teacher_id=$2',[owner.classroom_id,owner.id])).rows[0];
     }
-    if (!row) row=(await tx.query<Row>('SELECT * FROM classrooms WHERE teacher_id=$1 AND (code=$2 OR id=$5 OR (name=$3 AND period=$4)) ORDER BY created_at LIMIT 1',[owner.id,code,name,period,`demo-class-${owner.username}-${code}`])).rows[0];
+    if (!row) row=(await tx.query<Row>('SELECT * FROM classrooms WHERE teacher_id=$1 AND (code=$2 OR id=$5 OR (name=$3 AND period=$4)) ORDER BY created_at LIMIT 1',[owner.id,code,name,period,`demo-class-${owner.seed_key}-${code}`])).rows[0];
     if (row && row.code == null && row.legacy_code === 'BIO2026' && row.name === 'AP Biology · Period 2') {
      row=(await tx.query<Row>('UPDATE classrooms SET code=$1,period=COALESCE(period,$2) WHERE id=$3 RETURNING *',[code,period,row.id])).rows[0];
     }
-    if (!row) row=(await tx.query<Row>('INSERT INTO classrooms(id,teacher_id,name,period,code,start_time,end_time) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[`demo-class-${owner.username}-${code}`,owner.id,name,period,code,start,end])).rows[0];
+    if (!row) row=(await tx.query<Row>('INSERT INTO classrooms(id,teacher_id,name,period,code,start_time,end_time) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[`demo-class-${owner.seed_key}-${code}`,owner.id,name,period,code,start,end])).rows[0];
+    await remember(key,row.id);
     if (primary && !owner.classroom_id) await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2',[row.id,owner.id]);
     const {rows:[count]}=await tx.query<{n:string}>('SELECT COUNT(*) AS n FROM questions WHERE classroom_id=$1',[row.id]);
     if (Number(count.n)===0) for (const q of defaultQuestions) await tx.query('INSERT INTO questions(id,classroom_id,prompt,options,correct_index,topic,explanation,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[randomUUID(),row.id,q.prompt,JSON.stringify(q.options),q.correctIndex,q.topic,q.explanation,q.active]);
@@ -45,14 +59,18 @@ async function seed() {
    async function students(classroomId:unknown,names:string[][],hash=studentHash,extraClasses:unknown[]=[]) {
     for (const [first,last] of names) {
      const username=`${first}${last}`.toLowerCase();
-     const {rows:[existing]}=await tx.query<Row>('SELECT * FROM users WHERE username=$1',[username]);
+     const key=`student:${username}`;
+     const existing=await saved(key,'users')??(await tx.query<Row>('SELECT * FROM users WHERE username=$1',[username])).rows[0];
      if (existing) {
+      if(existing.role!=='student')throw new Error('A demo student username is assigned to another role. Existing accounts were preserved.');
+      await remember(key,existing.id);
       // Do not undo an existing transfer, removal, password change, or disable.
       if (existing.role==='student' && existing.classroom_id===classroomId) await enroll(tx,existing.id,classroomId);
       continue;
      }
      const id=randomUUID();
      await tx.query(`INSERT INTO users(id,role,first_name,last_name,username,password_hash,classroom_id,account_status) VALUES($1,'student',$2,$3,$4,$5,$6,'active')`,[id,first,last,username,hash,classroomId]);
+     await remember(key,id);
      await enroll(tx,id,classroomId);
      for(const extra of extraClasses)await enroll(tx,id,extra);
      // Only new sample trips receive a purpose; historical trips remain intact.

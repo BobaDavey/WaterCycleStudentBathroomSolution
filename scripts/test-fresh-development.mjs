@@ -124,7 +124,15 @@ try{
  origin=await start();const lateAdmin=client(origin);
  assert.equal((await lateAdmin('auth/login',{username:'davidanzezhang',password,role:'admin'})).status,200);
  await stop();delete env.LOCAL_DATABASE_PATH;
- console.log('PASS: independent fresh clone and npm install; automatic Codespaces setup; exact demo logins, Active enrollment/roster, questions/departure/return, pending approval, automatic private-secret Developer account, RBAC, repeat initialization, preserved password/status/history across restarts, no-secret demos, late secret injection, and production isolation.');
+ // Editing sample identities/settings must survive initialization too.
+ origin=await start();const editingAdmin=client(origin);
+ assert.equal((await editingAdmin('auth/login',{username:'davidanzezhang',password,role:'admin'})).status,200);
+ assert.equal((await editingAdmin('admin/teachers/'+teacherState.user.id,{username:'renamedpreviewteacher'},'PATCH')).status,200);
+ const editedTeacher=client(origin);assert.equal((await editedTeacher('auth/login',{username:'renamedpreviewteacher',password:changedPassword,role:'teacher'})).status,200);
+ const afternoon=teacherState.classes.find(c=>c.code==='DEMO2');
+ assert.equal((await editedTeacher('teacher/classes/'+afternoon.id,{name:'Intentionally renamed demo class',code:'EDIT2',startTime:'14:00',endTime:'19:00'},'PATCH')).status,200);
+ await stop();const renamed=await fingerprint();await run('npm',['run','dev:setup']);assert.equal(await fingerprint(),renamed,'intentional teacher username and class name/code/schedule edits survive initialization without duplicates');
+ console.log('PASS: independent fresh clone and npm install; automatic Codespaces setup; exact demo logins, Active enrollment/roster, questions/departure/return, pending approval, automatic private-secret Developer account, RBAC, repeat initialization, preserved password/status/history across restarts, no-secret demos, late secret injection, preserved teacher/class identity and schedule edits, and production isolation.');
 }catch(error){throw new Error(safe(error instanceof Error?error.message:'Fresh development verification failed.'));}
 finally{
  await stop();await rm(root,{recursive:true,force:true,maxRetries:20,retryDelay:100});

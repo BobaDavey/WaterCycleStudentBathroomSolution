@@ -217,7 +217,7 @@ For an older Codespace, stop the server and run `git pull --ff-only origin main`
 | Database migration/configuration error | Follow the specific terminal error. Preserve `.local/data`; never delete it to fix login. Managed database URLs are refused in Codespaces |
 | Prior local administrator uses a different username | Preserve that database and its existing access. For the required fresh accounts, choose a new ignored `LOCAL_DATABASE_PATH` and run setup; no administrator is renamed or added to an existing database |
 
-Initialization is repeatable: it adds missing accounts without duplicating classes/enrollments or replacing existing passwords, statuses, transfers, removals, and history. To create a separate fresh demo, choose a new ignored `LOCAL_DATABASE_PATH`; keep the old database intact. See [local database safety](docs/local-database.md).
+Initialization keeps a development-only seed-identity table in the isolated local database so deliberate account/class renames, code edits, and schedule edits are not recreated or undone. It is never created by managed production startup or migrations. Initialization is repeatable: it adds missing accounts without duplicating classes/enrollments or replacing existing passwords, statuses, transfers, removals, and history. To create a separate fresh demo, choose a new ignored `LOCAL_DATABASE_PATH`; keep the old database intact. See [local database safety](docs/local-database.md).
 
 ### Preview WaterCycle on Another Computer or GitHub Codespace
 
