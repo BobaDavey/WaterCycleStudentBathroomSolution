@@ -79,7 +79,7 @@ A migration failure rolls back the transaction. Investigate the safe error code 
 
 ## Validation
 
-Passed locally with isolated data: TypeScript checks, production build, all 124 backend tests, all 26 browser tests, the strengthened open-dialog revocation browser case, and all 13 TLS PostgreSQL persistence/recovery tests. The seed-repeat regression also verifies that unassigned questions and inactive sets remain unchanged. No production database was accessed or migrated. No lint command is configured.
+Passed locally with isolated data: TypeScript checks, production build, all 124 backend tests, all 26 browser tests, the strengthened open-dialog revocation browser case, and all 13 TLS PostgreSQL persistence/recovery tests. The seed-repeat regression also verifies that unassigned questions and inactive sets remain unchanged. A fresh independent clone/install/Codespaces-style setup check also passed, including real demo logins, departure/return, idempotent restart and isolation guards; this was not an actual GitHub Codespace. No production database was accessed or migrated. No lint command is configured.
 
 ## Changed files
 
