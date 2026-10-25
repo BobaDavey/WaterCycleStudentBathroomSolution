@@ -9,6 +9,7 @@ import { DEFAULT_TIME_ZONE, effectiveTimeZone } from './time-zones';
 import { classroomScope, assertClassroomTeacher } from './classroom-access';
 import { eligibleQuestionPredicate, questionFromRow, questionLibrary, defaultQuestionSet, linkQuestion, assertSet, assertQuestion, createQuestionSet, questionSetSchema } from './question-sets';
 import { defaultQuestions } from './default-questions';
+import { DEFAULT_PASS_CAPACITY, MAX_PASS_CAPACITY } from './class-capacity';
 import { submitProblemReport, listProblemReports, problemReportDetail, updateProblemReport, type ReportInput, type ReportFilters } from './problem-reports';
 import { loadRuleOffenders, type RuleOffendersFilters } from './rule-offenders';
 
@@ -25,8 +26,9 @@ export const signupSchema = z.object({ firstName: name, lastName: name, password
 export const enrollmentSchema = z.object({ classroomCode: code, classroomId: z.string().min(1).max(200).optional() });
 export const setupSchema = z.object({}).passthrough();
 const wallTime = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'Choose a valid class time.');
-export const classCreateSchema = z.object({ name: className, period, code, timeZone: timeZone.optional(), startTime: wallTime, endTime: wallTime }).refine(v=>v.startTime<v.endTime, 'Class end must be after start. Identical and overnight times are not supported.');
-export const classUpdateSchema = z.object({ name: className.optional(), period: z.union([z.string().trim().max(50), z.null()]).optional(), code: code.optional(), archived: z.boolean().optional(), timeZone: timeZone.optional(), startTime: wallTime.optional(), endTime: wallTime.optional() }).refine(v => Object.keys(v).length > 0, 'Choose a change.');
+const passCapacity = z.number().int('Max Passes Allowed must be a whole number.').min(1, 'Max Passes Allowed must be at least 1.').max(MAX_PASS_CAPACITY, `Max Passes Allowed cannot exceed ${MAX_PASS_CAPACITY}.`);
+export const classCreateSchema = z.object({ name: className, period, code, timeZone: timeZone.optional(), startTime: wallTime, endTime: wallTime, capacity: passCapacity.optional() }).refine(v=>v.startTime<v.endTime, 'Class end must be after start. Identical and overnight times are not supported.');
+export const classUpdateSchema = z.object({ name: className.optional(), period: z.union([z.string().trim().max(50), z.null()]).optional(), code: code.optional(), archived: z.boolean().optional(), timeZone: timeZone.optional(), startTime: wallTime.optional(), endTime: wallTime.optional(), capacity: passCapacity.optional() }).refine(v => Object.keys(v).length > 0, 'Choose a change.');
 export const classroomSchema = classUpdateSchema;
 export const questionSchema = z.object({ prompt: z.string().trim().min(8).max(1000), options: z.array(z.string().trim().min(1).max(300)).length(4), correctIndex: z.number().int().min(0).max(3), topic: z.string().trim().min(1).max(80), explanation: z.string().trim().max(2000).default(''), active: z.boolean().default(true), setIds:z.array(z.string().min(1).max(200)).max(200).optional() }).refine(q => new Set(q.options.map(s => s.toLowerCase())).size === 4, { message: 'Each answer option must be different.' });
 export const rosterSchema = z.object({ username:z.string().trim().min(1).max(100).transform(v=>v.toLowerCase()),studentId:z.string().min(1).max(200) });
@@ -84,11 +86,15 @@ async function promote(tx: SQL, classroomId: string, now?: Date) {
   await tx.query("UPDATE visits SET status='cancelled',cancellation_reason='This class session ended or became inactive. Your waiting request was cancelled; active break timers continue.' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[classroomId]);
   return;
  }
- // A correction can fill actual outside capacity while earlier reservations
- // remain. Persist the pause so a browser need not keep polling to retain its turn.
+ // Capacity reductions and corrections never end active trips or discard turns.
+ // Only the oldest reservations fitting the remaining capacity can depart. Pause
+ // overflow response windows persistently; resuming gives a fresh two minutes.
  const {rows:[outside]}=await tx.query("SELECT COUNT(*) AS n FROM visits WHERE classroom_id=$1 AND status='out'",[classroomId]);
- const paused=Number(outside.n)>=Number(classroom.capacity);
- await tx.query("UPDATE visits SET capacity_paused=$2,ready_expires_at=statement_timestamp()+INTERVAL '120 seconds' WHERE classroom_id=$1 AND status='ready' AND capacity_paused<>$2",[classroomId,paused]);
+ const available=Math.max(0,Number(classroom.capacity)-Number(outside.n));
+ await tx.query(`WITH reservations AS (
+  SELECT id,ROW_NUMBER() OVER(ORDER BY requested_at,id)>$2 AS paused FROM visits WHERE classroom_id=$1 AND status='ready'
+ ) UPDATE visits v SET capacity_paused=r.paused,ready_expires_at=statement_timestamp()+INTERVAL '120 seconds'
+ FROM reservations r WHERE v.id=r.id AND v.capacity_paused<>r.paused`,[classroomId,available]);
  const { rows: [count] } = await tx.query("SELECT COUNT(*) AS n FROM visits WHERE classroom_id=$1 AND status IN ('ready','out')", [classroomId]);
  const slots = Math.max(0, Number(classroom.capacity) - Number(count.n));
  if (slots) await tx.query(`UPDATE visits SET status='ready',ready_at=statement_timestamp(),ready_expires_at=statement_timestamp()+INTERVAL '120 seconds' WHERE id IN (SELECT id FROM visits WHERE classroom_id=$1 AND status='waiting' ORDER BY requested_at,id LIMIT $2)`, [classroomId, slots]);
@@ -318,7 +324,7 @@ export class WaterCycle {
    await lockClasses(tx,[classroomId]);await checkStudentAccess(tx,user,classroomId,action!=='leave',this.clock?.());await this.promote(tx,classroomId);
    const {rows:[visit]}=await tx.query("SELECT * FROM visits WHERE student_id=$1 AND status IN ('waiting','ready','out') FOR UPDATE",[user.id]);
    if(!visit||visit.classroom_id!==classroomId)return 'Your reservation expired or your pass changed. Please refresh.';
-   if(action==='leave') {if(visit.status!=='ready')return 'Please wait for your turn before leaving.';const {rows:[occupied]}=await tx.query("SELECT (SELECT COUNT(*) FROM visits WHERE classroom_id=$1 AND status='out') AS n,capacity FROM classrooms WHERE id=$1",[classroomId]);if(Number(occupied.n)>=Number(occupied.capacity))return 'All spots are occupied after a teacher correction. Keep your place and wait for a spot to open.';const departed=await serverClock(tx);const {rows:[scheduled]}=await tx.query('SELECT * FROM classrooms WHERE id=$1',[classroomId]);if(!isClassInSession(classroomFrom(scheduled),this.clock?.()??departed))return 'Class Not in Session. The session ended before departure.';await tx.query("UPDATE visits SET status='out',left_at=$2,ready_expires_at=NULL,capacity_paused=FALSE WHERE id=$1",[visit.id,departed.toISOString()]);}
+   if(action==='leave') {if(visit.status!=='ready')return 'Please wait for your turn before leaving.';const {rows:[occupied]}=await tx.query("SELECT (SELECT COUNT(*) FROM visits WHERE classroom_id=$1 AND status='out') AS n,capacity FROM classrooms WHERE id=$1",[classroomId]);if(visit.capacity_paused||Number(occupied.n)>=Number(occupied.capacity))return 'Your reserved turn is paused at the current classroom limit. Keep your place and wait for a spot to open.';const departed=await serverClock(tx);const {rows:[scheduled]}=await tx.query('SELECT * FROM classrooms WHERE id=$1',[classroomId]);if(!isClassInSession(classroomFrom(scheduled),this.clock?.()??departed))return 'Class Not in Session. The session ended before departure.';await tx.query("UPDATE visits SET status='out',left_at=$2,ready_expires_at=NULL,capacity_paused=FALSE WHERE id=$1",[visit.id,departed.toISOString()]);}
    else if(action==='return') {if(visit.status!=='out')return 'You can record your return after you have left.';await tx.query("UPDATE visits SET status='returned',returned_at=statement_timestamp() WHERE id=$1",[visit.id]);}
    else {if(visit.status==='out')return 'Use I’m back to finish your current trip.';await tx.query("UPDATE visits SET status='cancelled' WHERE id=$1",[visit.id]);}
    await this.promote(tx,classroomId);return null;
@@ -356,11 +362,12 @@ export class WaterCycle {
   input={...input,code:normalizedCode(input.code),timeZone:timeZone.parse(input.timeZone ?? DEFAULT_TIME_ZONE)};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
    await currentActor(tx,user,'teacher',true);const id=randomUUID();
-   const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code,time_zone,start_time,end_time) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',[id,user.id,input.name,input.period || null,input.code,input.timeZone,input.startTime??null,input.endTime??null]);
+   const {rows:[row]}=await tx.query('INSERT INTO classrooms(id,teacher_id,name,period,code,time_zone,start_time,end_time,capacity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[id,user.id,input.name,input.period || null,input.code,input.timeZone,input.startTime??null,input.endTime??null,input.capacity??DEFAULT_PASS_CAPACITY]);
    await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2 AND classroom_id IS NULL',[id,user.id]);await this.seedQuestions(tx,id);return classroomFrom(row);
   });
  }
  async updateClass(user:User,id:string,input:z.infer<typeof classUpdateSchema>):Promise<Classroom> {
+  input=classUpdateSchema.parse(input);
   if(input.code!==undefined)input={...input,code:normalizedCode(input.code)};
   if(input.timeZone!==undefined)input={...input,timeZone:timeZone.parse(input.timeZone)};
   requirePasswordChange(user);return this.db.transaction(async tx=>{
@@ -369,7 +376,7 @@ export class WaterCycle {
    if((input.startTime!==undefined||input.endTime!==undefined)&&(!start||!end||start>=end))throw new AppError(400,'Class end must be after start. Identical and overnight times are not supported.');
    const nextCode=input.code??nullable(current.code);const archived=input.archived??Boolean(current.archived);
    if(!archived&&!nextCode)throw new AppError(400,'Choose a five-character enrollment code before activating this class.');
-   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6,start_time=$7,end_time=$8 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??effectiveTimeZone(current.time_zone as string | null),start,end]);
+   const {rows:[row]}=await tx.query('UPDATE classrooms SET name=$1,period=$2,code=$3,archived=$4,time_zone=$6,start_time=$7,end_time=$8,capacity=$9 WHERE id=$5 RETURNING *',[input.name??current.name,input.period!==undefined?(input.period||null):current.period,nextCode,archived,id,input.timeZone??effectiveTimeZone(current.time_zone as string | null),start,end,input.capacity??current.capacity]);
    if(archived&&!current.archived){await tx.query("UPDATE visits SET status='cancelled' WHERE classroom_id=$1 AND status IN ('waiting','ready')",[id]);await tx.query('UPDATE quizzes SET used=TRUE WHERE classroom_id=$1 AND used=FALSE',[id]);}
    await this.promote(tx,id);
    return classroomFrom({...row,student_count:current.student_count});

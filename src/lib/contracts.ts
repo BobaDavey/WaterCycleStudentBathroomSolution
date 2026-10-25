@@ -42,8 +42,8 @@ export interface RuleOffendersState { violations: RuleViolation[]; nextCursor: s
 // GET /api/teacher/state?classroomId=optional -> TeacherState (default first active owned/shared class; null if none)
 // GET /api/teacher/violations?classroomId=optional&search=optional&cursor=optional&limit=50 -> RuleOffendersState
 // GET /api/admin/violations same filters -> RuleOffendersState (privileged oversight)
-// POST /api/teacher/classes {name,period?:string,code:string,timeZone?:string,startTime,endTime} -> {classroom}
-// PATCH /api/teacher/classes/:id {name?:string,period?:string,code?:string,archived?:boolean,timeZone?:string,startTime?:string,endTime?:string} -> {classroom}
+// POST /api/teacher/classes {name,period?:string,code:string,timeZone?:string,startTime,endTime,capacity?:number} -> {classroom}
+// PATCH /api/teacher/classes/:id {name?:string,period?:string,code?:string,archived?:boolean,timeZone?:string,startTime?:string,endTime?:string,capacity?:number} -> {classroom}
 // POST /api/teacher/roster/lookup?classroomId=id {username} -> {student: confirmed identity}
 // POST /api/teacher/roster?classroomId=id {username,studentId} -> {student}; existing registered account, audited Approved enrollment only
 // PATCH /api/teacher/roster/:studentId?classroomId=id {accountStatus?:active|deactivated,password?:string} -> {ok:true}

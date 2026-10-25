@@ -226,6 +226,13 @@ INSERT INTO classroom_question_sets(classroom_id,set_id)
  SELECT id,'legacy-bank-'||id FROM classrooms;
 `;
 
+// Keep migrations 1–7 immutable. Reuse the original persisted capacity column;
+// changing its constraint does not rewrite classroom values or visit records.
+export const maxPassesMigration = `
+ALTER TABLE classrooms DROP CONSTRAINT classrooms_capacity_check;
+ALTER TABLE classrooms ADD CONSTRAINT classrooms_capacity_check CHECK(capacity BETWEEN 1 AND 30);
+`;
+
 export const migrations = [
  {version:1,sql:multiTeacherMigration},
  {version:2,sql:studentBreakMigration},
@@ -243,6 +250,7 @@ CREATE TABLE watercycle_migration_runs (
 );`},
  {version:6,sql:enrollmentScheduleMigration},
  {version:7,sql:teacherEnhancementsMigration},
+ {version:8,sql:maxPassesMigration},
 ] as const;
 export const latestMigrationVersion = migrations.at(-1)!.version;
 /** Caller holds the PostgreSQL initialization lock and transaction. */

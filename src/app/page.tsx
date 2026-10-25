@@ -76,7 +76,7 @@ export default function Home() {
       <div className="auth-story-content">
         <span className="story-pill"><span className="pulse-dot" /> BUILT FOR YOUR CLASSROOM</span>
         <h1>A quick learning.<br />A better <em>flow.</em></h1>
-        <p>Make room for curiosity. A thoughtful way to manage bathroom breaks, one biology question at a time.</p>
+        <p>Make room for curiosity. A thoughtful way to manage bathroom breaks.</p>
         <div className="flow-illustration" aria-hidden="true">
           <div className="orbit orbit-one" /><div className="orbit orbit-two" />
           <div className="leaf-drawing"><Sprout size={107} strokeWidth={1.1} /></div>

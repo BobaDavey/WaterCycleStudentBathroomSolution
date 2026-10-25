@@ -1,6 +1,6 @@
 # Persistent production storage and recovery
 
-For the Teacher Portal feature release, follow the [migration 7 review and cutover sequence](teacher-portal-enhancements.md#production-sequence--separate-approval-required). Existing version-6 production databases need only reviewed migration 7 and its additional restricted-role grants; do not repeat fresh-database initialization.
+For the Teacher Portal feature release, follow the [migrations 7–8 review and cutover sequence](teacher-portal-enhancements.md#production-sequence--separate-approval-required). Existing version-6 production databases need reviewed migrations 7–8 and migration 7’s additional restricted-role grants (version-7 databases need only migration 8); do not repeat fresh-database initialization.
 
 WaterCycle stores accounts, password hashes, enrollment, learning attempts, sessions, trips, correction/approval audits, and support tickets in PostgreSQL. Rule Offenders is derived from trip timestamps; preserving trips preserves violation history.
 
@@ -55,7 +55,7 @@ Run the read-only inspection:
 npm run db:status
 ```
 
-The result includes `currentVersion`, `latestVersion`, `pending`, and `bound`. For a genuinely new empty database, expect `currentVersion: 0`, pending versions 1–7, and `bound: false`. This feature release's latest version is 7. If you see an identity mismatch, incompatible history, or missing expected tables, **stop** and follow the recovery section; do not delete the ledger, recreate tables, or change the UUID to force the check to pass.
+The result includes `currentVersion`, `latestVersion`, `pending`, and `bound`. For a genuinely new empty database, expect `currentVersion: 0`, pending versions 1–8, and `bound: false`. This feature release's latest version is 8. If you see an identity mismatch, incompatible history, or missing expected tables, **stop** and follow the recovery section; do not delete the ledger, recreate tables, or change the UUID to force the check to pass.
 
 ### Step 4: Verify a backup before initialization or migration
 
@@ -72,7 +72,7 @@ npm run db:migrate -- --expected-version 0 --backup-reference YOUR_VERIFIED_NEON
 npm run db:status
 ```
 
-If `currentVersion` was another number, use **that exact number** instead of 0. If `pending` is empty and `bound` is true, skip migration. Successful initialization shows `pending: []`, `bound: true`, and `currentVersion: 7`. Migrations use a transaction and preserve existing records. Do not add this command to Vercel's install, build or startup commands.
+If `currentVersion` was another number, use **that exact number** instead of 0. If `pending` is empty and `bound` is true, skip migration. Successful initialization shows `pending: []`, `bound: true`, and `currentVersion: 8`. Migrations use a transaction and preserve existing records. Do not add this command to Vercel's install, build or startup commands.
 
 ### Step 6: Create a dedicated restricted runtime role
 

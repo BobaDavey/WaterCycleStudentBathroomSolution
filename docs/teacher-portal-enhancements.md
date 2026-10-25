@@ -2,6 +2,8 @@
 
 This feature branch targets `main` for review. Do not merge or migrate the production Neon database until the owner approves the release. No production connection is used by the development or test commands below.
 
+The follow-up update adds [Max Passes Allowed and migration 8](max-passes-allowed.md), plus the requested shorter login description. Review migrations 7 and 8 together for this branch.
+
 ## Behavior
 
 - The selected-class dropdown is on Overview, immediately left of Class Code. Selection persists across teacher pages. Overview approvals, counts, queue, code, and live flow are scoped to that class. Class Roster cards remain another way to open a class. The global header shows the class name without a dropdown.
@@ -34,7 +36,7 @@ Shared class checks are centralized in `src/lib/classroom-access.ts` and used by
 ## Test in isolation
 
 1. Create a new Codespace on **this feature branch**, or use a separate local checkout with Node 24. Do not copy production environment files or production database credentials. Codespaces continue to refuse managed URLs.
-2. The existing Codespaces setup installs dependencies, initializes its independent local PGlite database, applies migration 7 locally and prepares development demo accounts. Outside Codespaces, run `npm ci`, then `npm run dev:setup` in a fresh development checkout without managed connection variables.
+2. The existing Codespaces setup installs dependencies, initializes its independent local PGlite database, applies migrations 7 and 8 locally and prepares development demo accounts. Outside Codespaces, run `npm ci`, then `npm run dev:setup` in a fresh development checkout without managed connection variables.
 3. Run `npm run dev` and open port 3000. Development teacher: `teachertest` / `1234567890`. Development student: `teststudent` / `1234567890`.
 4. On Overview, switch between the demo classes and check Class Code/statistics. Visit Question bank, create two sets, put a question in both, combine filters, and configure each class's active sets separately. Verify that two distinct active questions are available before requesting a break.
 5. In Class Roster → View Class, look up `teststudent` in a class they have not joined and confirm the matched identity. Existing memberships correctly report that the student is already enrolled.
@@ -50,9 +52,9 @@ Automated checks: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run 
 
 ## Production sequence — separate approval required
 
-1. Review/approve the PR and migration 7. Validate the complete flow against a separate synthetic PostgreSQL environment first. Record the exact reviewed release commit. Keep the existing production resource, `main` database branch, connection role and `WATERCYCLE_DATABASE_ID` unchanged.
-2. Schedule a quiet cutover and pause classroom writes. Stop older deployments/background callers from writing during the migration/code transition. The existing runtime refuses a migration ledger newer than its code understands, so older releases must not be used as rollback after version 7.
-3. On the trusted operator Mac, use the exact reviewed release code with the existing private maintenance configuration (not an older checkout whose latest schema is still 6). Run `npm run db:status`. Expect current version **6** with pending **[7]**. If the result differs, stop and review the actual plan; never edit/delete ledger entries.
+1. Review/approve the PR and migrations 7 and 8. Validate the complete flow against a separate synthetic PostgreSQL environment first. Record the exact reviewed release commit. Keep the existing production resource, `main` database branch, connection role and `WATERCYCLE_DATABASE_ID` unchanged.
+2. Schedule a quiet cutover and pause classroom writes. Stop older deployments/background callers from writing during the migration/code transition. The existing runtime refuses a migration ledger newer than its code understands, so older releases must not be used as rollback after version 8.
+3. On the trusted operator Mac, use the exact reviewed release code with the existing private maintenance configuration (not an older checkout whose latest schema is still 6). Run `npm run db:status`. Expect current version **6** with pending **[7, 8]**. A database already at version 7 needs only **[8]**, using `--expected-version 7` instead in step 5. If the result differs, stop and review the actual plan; never edit/delete ledger entries.
 4. Obtain and verify a **fresh production backup/recovery checkpoint** immediately before this release. Do not reuse an old empty-database backup taken before classroom records existed. Record its actual private reference and prove recovery access using the production guide.
 5. Only after approval, run the following locally with the direct maintenance connection and actual verified backup reference:
 
@@ -61,7 +63,7 @@ Automated checks: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run 
    npm run db:status
    ```
 
-   Expect version **7**, pending **[]**, and `bound: true` with the same UUID. Startup/build commands still never perform managed migrations or bootstrap accounts.
+   Expect version **8**, pending **[]**, and `bound: true` with the same UUID. Startup/build commands still never perform managed migrations or bootstrap accounts.
 6. Have the database owner apply these additional grants to the **existing** restricted runtime role in that same production database:
 
    ```sql
@@ -72,29 +74,33 @@ Automated checks: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run 
    ```
 
    Keep all previous grants and all existing role restrictions. No password rotation or ownership change is needed. Run `npm run db:check` locally using the restricted connection.
-7. Merge/deploy the reviewed release only after approval. Preserve the existing protected runtime connection and Production scope. Keep owner/migration credentials outside Vercel. Migration 7 contains no environment-variable or integration changes.
+7. Merge/deploy the reviewed release only after approval. Preserve the existing protected runtime connection and Production scope. Keep owner/migration credentials outside Vercel. Migrations 7 and 8 contain no environment-variable or integration changes. Migration 8 requires no grants beyond the existing table permissions.
 8. Check `/api/health`, anonymous `/api/auth/me`, existing account logins, class codes, default active sets, pending approvals, a complete student break, co-teacher access/revocation, Rule Offenders and reports. Confirm record counts and sample existing question content/history against the pre-release verification. Resume classroom use after acceptance.
 
 A migration failure rolls back the transaction. Investigate the safe error code and retain the existing database. Do not reset, reseed, drop tables or force the migration ledger backward. After a successful migration, prefer a forward fix; incident recovery must follow the separate backup/restore procedure and preserve subsequent classroom writes.
 
 ## Validation
 
-Passed locally with isolated data: TypeScript checks, production build, all 124 backend tests, all 26 browser tests, the strengthened open-dialog revocation browser case, and all 13 TLS PostgreSQL persistence/recovery tests. The seed-repeat regression also verifies that unassigned questions and inactive sets remain unchanged. A fresh independent clone/install/Codespaces-style setup check also passed, including real demo logins, departure/return, idempotent restart and isolation guards; this was not an actual GitHub Codespace. No production database was accessed or migrated. No lint command is configured.
+Passed locally with isolated data: TypeScript checks, production build, all **135 backend tests**, all **28 browser tests**, and all **14 TLS PostgreSQL persistence/recovery tests**. The capacity follow-up also has focused browser coverage for pausing/resuming turn alerts and direct-API departure enforcement. A strengthened disk-restart/seed-repeat check preserves active trips, paused reservations, teacher-changed capacity, unassigned questions and inactive sets. Tests cover limits 1, 2, 3 and 5, co-teacher changes, FIFO and concurrent requests. Baseline schema and migration SQL 1–7 were compared with the previous feature commit and are unchanged. No production database was accessed or migrated; no production deployment was performed. These checks use isolated local/Docker environments, not a real GitHub Codespace. No lint command is configured.
 
 ## Changed files
 
-The versioned migration is **7**, defined in `src/lib/migrations.ts`. The complete review file list is:
+The versioned migrations are **7 and 8**, defined in `src/lib/migrations.ts`. The complete review file list is:
 
 - `README.md`
 - `docs/production-database.md`
 - `docs/teacher-portal-enhancements.md`
+- `docs/max-passes-allowed.md`
 - `scripts/seed.ts`
 - `src/app/api/[...path]/route.ts`
+- `src/app/page.tsx`
 - `src/components/question-bank.tsx`
 - `src/components/student-dashboard.tsx`
+- `src/components/student-dashboard.module.css`
 - `src/components/teacher-dashboard.module.css`
 - `src/components/teacher-dashboard.tsx`
 - `src/lib/classroom-access.ts`
+- `src/lib/class-capacity.ts`
 - `src/lib/contracts.ts`
 - `src/lib/domain.ts`
 - `src/lib/managed-database.ts`
@@ -102,13 +108,16 @@ The versioned migration is **7**, defined in `src/lib/migrations.ts`. The comple
 - `src/lib/question-sets.ts`
 - `src/lib/rule-offenders.ts`
 - `tests/e2e/classroom.spec.ts`
+- `tests/e2e/class-capacity.spec.ts`
 - `tests/e2e/enrollment-schedules.spec.ts`
 - `tests/e2e/portals.spec.ts`
 - `tests/e2e/teacher-enhancements.spec.ts`
 - `tests/e2e/time-zones.spec.ts`
 - `tests/migrations.test.ts`
+- `tests/class-capacity.test.ts`
 - `tests/multiclass.test.ts`
 - `tests/postgres/persistence.test.ts`
+- `tests/postgres/deployment-worker.ts`
 - `tests/student-fixtures.ts`
 - `tests/teacher-demo-preservation.test.ts`
 - `tests/teacher-enhancements.test.ts`

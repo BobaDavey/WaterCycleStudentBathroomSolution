@@ -15,6 +15,7 @@ import { bootstrapAdministrator } from '../../src/lib/bootstrap-admin';
 import { hashPassword,userFrom } from '../../src/lib/auth';
 import { WaterCycle } from '../../src/lib/domain';
 import { bootstrapDevelopmentAdministrator } from '../../src/lib/development-admin';
+import type { User } from '../../src/lib/contracts';
 import type { DatabaseBinding } from '../../src/lib/database-policy';
 const base=process.env.WATERCYCLE_POSTGRES_TEST_URL!;
 const container=process.env.WATERCYCLE_POSTGRES_CONTAINER!;
@@ -78,7 +79,7 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
     const auth=await fetch(`${origin}/api/auth/me`,{headers:{Cookie:studentCookie}});assert.equal(auth.status,200);assert.equal((await auth.json()).user.id,saved.studentId);
     const student=await fetch(`${origin}/api/student/state`,{headers:{Cookie:studentCookie}});assert.equal(student.status,200);assert.equal((await student.json()).activeQuiz.correctCount,1);
     if(!teacherCookie){const login=await fetch(`${origin}/api/auth/login`,{method:'POST',headers:{Origin:origin.replace('http:','https:'),'X-Forwarded-Proto':'https','Content-Type':'application/json'},body:JSON.stringify({username:'persistenceteacher',password:credentials.teacher,role:'teacher'})});assert.equal(login.status,200);assert.match(login.headers.get('set-cookie')!,/;\s*Secure/i);teacherCookie=login.headers.get('set-cookie')!.split(';')[0];}
-    const teacher=await fetch(`${origin}/api/teacher/state`,{headers:{Cookie:teacherCookie}});assert.equal(teacher.status,200);assert.equal((await teacher.json()).students.length,2);
+    const teacher=await fetch(`${origin}/api/teacher/state`,{headers:{Cookie:teacherCookie}});assert.equal(teacher.status,200);const teacherState=await teacher.json();assert.equal(teacherState.students.length,2);assert.equal(teacherState.classroom.capacity,5);
     const after=await snapshot('wc_production');for(const table of tables.filter(table=>!['sessions','rate_limits'].includes(table)))assert.deepEqual(after[table],original[table]);
     if(firstSnapshot)assert.deepEqual(after,firstSnapshot);else firstSnapshot=after;
    }finally{if(server.exitCode===null)server.kill('SIGTERM');await exited;}
@@ -193,6 +194,37 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
    await assert.rejects(()=>app.newQuiz(student,'water',other.id),/approval/);
    const original=await app.newQuiz(student,'water',room.id);await app.cancelQuiz(student,original.id);await app.updateRoster(two,student.id,{accountStatus:'active'},other.id);
    const competing=await Promise.allSettled([app.newQuiz(student,'water',room.id),app.newQuiz(student,'water',other.id)]);assert.equal(competing.filter(result=>result.status==='fulfilled').length,1);assert.equal((await db.query('SELECT id FROM quizzes WHERE student_id=$1 AND used=FALSE',[student.id])).rows.length,1);
+  }finally{await db.close();}
+ });
+ it('serializes concurrent quiz completion and capacity edits through the restricted PostgreSQL role',async()=>{
+  const db=await createDatabase({url:urlFor('wc_preview',true),binding:preview});
+  try{
+   const app=new WaterCycle(db,()=>new Date('2026-07-06T12:30:00Z'));
+   const teacher=async(username:string)=>userFrom((await db.query("INSERT INTO users(id,role,first_name,last_name,username) VALUES($1,'teacher','Capacity','Teacher',$2) RETURNING *",[randomUUID(),username])).rows[0]);
+   const primary=await teacher('pgcapacity'),co=await teacher('pgcapacityco');
+   const hash=await hashPassword(randomBytes(24).toString('hex'));
+   for(const capacity of [1,2,3,5]){
+    const classroom=await app.createClass(primary,{name:`Capacity ${capacity}`,code:`PGC0${capacity}`,startTime:'08:00',endTime:'09:30'});assert.equal(classroom.capacity,2);
+    await app.addCoTeacher(primary,classroom.id,co.username);await app.updateClass(co,classroom.id,{capacity});
+    const students:User[]=[];
+    for(let index=0;index<capacity+3;index++){
+     const student=userFrom((await db.query("INSERT INTO users(id,role,first_name,last_name,username,password_hash) VALUES($1,'student','Capacity','Student',$2,$3) RETURNING *",[randomUUID(),`pgcapacity${capacity}student${index}`,hash])).rows[0]);
+     await app.addRoster(co,{username:student.username,studentId:student.id},classroom.id);students.push(student);
+    }
+    async function answer(student:typeof students[number],quiz:Awaited<ReturnType<WaterCycle['newQuiz']>>){
+     const {rows:[row]}=await db.query<{questions:{id:string;correctIndex:number}[]}>('SELECT questions FROM quizzes WHERE id=$1',[quiz.id]);
+     return app.answerQuiz(student,{quizId:quiz.id,questionId:quiz.question.id,questionToken:quiz.questionToken,answer:row.questions.find(q=>q.id===quiz.question.id)!.correctIndex});
+    }
+    const quizzes=await Promise.all(students.map(async student=>(await answer(student,await app.newQuiz(student,'restroom',classroom.id))).quiz!));
+    const results=await Promise.all(students.map((student,index)=>answer(student,quizzes[index])));assert.equal(results.filter(r=>r.visit?.status==='out').length,capacity);assert.equal(results.filter(r=>r.visit?.status==='waiting').length,3);
+    const active=results.filter(r=>r.visit?.status==='out').map(r=>r.visit!);
+    const original=await db.query("SELECT * FROM visits WHERE classroom_id=$1 AND status='out' ORDER BY id",[classroom.id]);
+    await app.updateClass(co,classroom.id,{capacity:1});assert.deepEqual((await db.query("SELECT * FROM visits WHERE classroom_id=$1 AND status='out' ORDER BY id",[classroom.id])).rows,original.rows);
+    await Promise.all(active.map(visit=>app.studentAction(students.find(s=>s.id===visit.studentId)!,'return')));
+    const queue=await app.teacherState(primary,classroom.id);assert.equal(queue.stats.out,0);assert.equal(queue.stats.ready,1);assert.equal(queue.stats.waiting,2);
+    await app.updateClass(co,classroom.id,{capacity:3});
+    const departures=await Promise.allSettled(students.filter(s=>!active.some(v=>v.studentId===s.id)).map(s=>app.studentAction(s,'leave')));assert.equal(departures.filter(r=>r.status==='fulfilled').length,3);assert.equal((await app.teacherState(primary,classroom.id)).stats.out,3);
+   }
   }finally{await db.close();}
  });
  it('requires a backup reference and reviewed version before adopting/migrating an existing schema, preserving original fields',async()=>{
