@@ -25,7 +25,7 @@ const production:DatabaseBinding={environment:'production',databaseId:randomUUID
 const credentials={admin:randomBytes(24).toString('hex'),temporary:randomBytes(24).toString('hex'),teacher:randomBytes(24).toString('hex'),student:randomBytes(24).toString('hex')};
 const rolePassword=randomBytes(24).toString('hex');
 const databases=['wc_production','wc_preview','wc_restore','wc_legacy','wc_empty','wc_broken','wc_diagnostics'];
-const tables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events','student_username_counters'];
+const tables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events','student_username_counters','classroom_teachers','question_sets','question_set_questions','classroom_question_sets'];
 let owner:Pool,saved:Record<string,string>;
 function urlFor(name:string,runtime=false){assert.ok(databases.includes(name));const url=new URL(base);url.pathname=`/${name}`;if(runtime){url.username='wc_runtime';url.password=rolePassword;}return url.toString();}
 function poolFor(name:string){return new Pool({connectionString:urlFor(name),max:2});}
@@ -60,7 +60,7 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
  after(async()=>await owner?.end());
  it('creates real classroom data through one application process and preserves every row through three fresh deployment processes',async()=>{
   const created=await run(['--import','tsx','tests/postgres/deployment-worker.ts','create'],deploymentEnv());assert.equal(created.code,0,created.stderr);saved=JSON.parse(created.stdout.trim());
-  const original=await snapshot('wc_production');assert.ok(tables.filter(table=>table!=='rate_limits').every(table=>original[table].length>0));
+  const original=await snapshot('wc_production');assert.ok(tables.filter(table=>!['rate_limits','classroom_teachers'].includes(table)).every(table=>original[table].length>0));
   for(let deploy=0;deploy<3;deploy++){const result=await run(['--import','tsx','tests/postgres/deployment-worker.ts','verify'],deploymentEnv());assert.equal(result.code,0,result.stderr);assert.deepEqual(await snapshot('wc_production'),original);}
  });
  it('serves existing student and teacher sessions through two production Next.js server restarts',async()=>{
@@ -138,6 +138,24 @@ describe('Real PostgreSQL deployment persistence and recovery',()=>{
    for(const [username,role] of [['teststudent','student'],['teachertest','teacher']] as const)await assert.rejects(()=>app.login({username,role,password:'1234567890'}),/incorrect/);
   }finally{await db.close();}
   assert.deepEqual(await snapshot('wc_production'),before);
+ });
+ it('supports Question Sets, confirmed enrollment and co-teacher authorization through the restricted PostgreSQL role',async()=>{
+  const pool=poolFor('wc_diagnostics');try{await bootstrapAdministrator(adapter(pool),credentials.admin);}finally{await pool.end();}
+  const db=await createDatabase({url:urlFor('wc_diagnostics',true),binding:production});
+  try{
+   const app=new WaterCycle(db),admin=await app.login({username:'davidanzezhang',password:credentials.admin,role:'admin'});
+   async function teacher(username:string){await app.createTeacher(admin,{firstName:'Restricted',lastName:'Teacher',username,password:credentials.temporary,enabled:true});let user=await app.login({username,password:credentials.temporary,role:'teacher'});await app.changePassword(user,credentials.temporary,credentials.teacher);return app.login({username,password:credentials.teacher,role:'teacher'});}
+   const primary=await teacher('setsprimary'),co=await teacher('setsco');
+   const classroom=await app.createClass(primary,{name:'Restricted shared class',code:'PGS01',startTime:'00:00',endTime:'23:59'});
+   const set=await app.saveQuestionSet(primary,classroom.id,{name:'Restricted shared set',description:'Synthetic PostgreSQL fixture'});
+   const bank=await app.teacherState(primary,classroom.id);for(const question of bank.questions.slice(0,2))await app.setQuestionMembership(primary,classroom.id,set.id,question.id,true);
+   await app.setActiveQuestionSets(primary,classroom.id,[set.id]);assert.equal((await app.teacherState(primary,classroom.id)).eligibleQuestionCount,2);
+   await app.addCoTeacher(primary,classroom.id,co.username);assert.equal((await app.teacherState(co,classroom.id)).classroom?.id,classroom.id);
+   const student=await app.signup({firstName:'Restricted',lastName:'Learner',password:credentials.student});const match=await app.lookupStudent(co,student.username,classroom.id);await app.addRoster(co,{username:match.username,studentId:match.id},classroom.id);assert.equal((await app.rosterDetail(primary,student.id,classroom.id)).student.accountStatus,'active');
+   await assert.rejects(()=>app.removeCoTeacher(co,classroom.id,co.id),/Primary Teacher/);await assert.rejects(()=>app.addCoTeacher(co,classroom.id,primary.username),/Primary Teacher/);
+   await app.updateClass(co,classroom.id,{period:'Shared'});await app.removeCoTeacher(primary,classroom.id,co.id);await assert.rejects(()=>app.teacherState(co,classroom.id),/Class not found/);
+   await app.deleteQuestionSet(primary,classroom.id,set.id);assert.equal((await app.teacherState(primary,classroom.id)).eligibleQuestionCount,0);assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM questions WHERE classroom_id=$1',[classroom.id])).rows[0].n,bank.questions.length);
+  }finally{await db.close();}
  });
  it('uses a non-owner runtime role that cannot drop, truncate, recreate, or rewrite schema metadata',async()=>{
   const db=await createDatabase({url:urlFor('wc_production',true),binding:production});try{

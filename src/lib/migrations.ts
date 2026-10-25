@@ -180,6 +180,52 @@ INSERT INTO student_username_counters(base,next_number)
  WHERE parts IS NOT NULL GROUP BY parts[1];
 `;
 
+export const teacherEnhancementsMigration = `
+CREATE TABLE classroom_teachers (
+ classroom_id TEXT NOT NULL REFERENCES classrooms(id), teacher_id TEXT NOT NULL REFERENCES users(id),
+ added_by TEXT NOT NULL REFERENCES users(id), active BOOLEAN NOT NULL DEFAULT TRUE,
+ added_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(), removed_at TIMESTAMPTZ,
+ PRIMARY KEY(classroom_id,teacher_id)
+);
+CREATE INDEX classroom_teachers_access ON classroom_teachers(teacher_id,classroom_id) WHERE active=TRUE;
+CREATE FUNCTION validate_watercycle_coteacher() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.active AND (NOT EXISTS(SELECT 1 FROM users WHERE id=NEW.teacher_id AND role='teacher' AND enabled=TRUE)
+ OR EXISTS(SELECT 1 FROM classrooms WHERE id=NEW.classroom_id AND teacher_id=NEW.teacher_id)) THEN
+  RAISE EXCEPTION 'Co-teachers must be existing enabled teachers other than the primary teacher.' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER validate_watercycle_coteacher BEFORE INSERT OR UPDATE ON classroom_teachers FOR EACH ROW EXECUTE FUNCTION validate_watercycle_coteacher();
+CREATE TABLE question_sets (
+ id TEXT PRIMARY KEY, teacher_id TEXT NOT NULL REFERENCES users(id), origin_classroom_id TEXT NOT NULL REFERENCES classrooms(id),
+ name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 100), description TEXT NOT NULL DEFAULT '' CHECK(length(description)<=2000),
+ deleted BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
+);
+CREATE INDEX question_sets_teacher ON question_sets(teacher_id,deleted);
+CREATE INDEX question_sets_origin ON question_sets(origin_classroom_id) WHERE deleted=FALSE;
+CREATE INDEX questions_classroom_library ON questions(classroom_id) WHERE deleted=FALSE;
+CREATE TABLE question_set_questions (
+ set_id TEXT NOT NULL REFERENCES question_sets(id), question_id TEXT NOT NULL REFERENCES questions(id), active BOOLEAN NOT NULL DEFAULT TRUE,
+ PRIMARY KEY(set_id,question_id)
+);
+CREATE INDEX question_set_questions_question ON question_set_questions(question_id,set_id) WHERE active=TRUE;
+CREATE TABLE classroom_question_sets (
+ classroom_id TEXT NOT NULL REFERENCES classrooms(id), set_id TEXT NOT NULL REFERENCES question_sets(id), active BOOLEAN NOT NULL DEFAULT TRUE,
+ PRIMARY KEY(classroom_id,set_id)
+);
+CREATE INDEX classroom_question_sets_set ON classroom_question_sets(set_id,classroom_id);
+-- Record new question creation times without inventing historical dates.
+ALTER TABLE questions ADD COLUMN created_at TIMESTAMPTZ;
+ALTER TABLE questions ALTER COLUMN created_at SET DEFAULT statement_timestamp();
+INSERT INTO question_sets(id,teacher_id,origin_classroom_id,name,description)
+ SELECT 'legacy-bank-'||id,teacher_id,id,left('Existing question bank · '||name,100),'Preserved questions from '||name FROM classrooms;
+INSERT INTO question_set_questions(set_id,question_id)
+ SELECT 'legacy-bank-'||classroom_id,id FROM questions WHERE deleted=FALSE;
+INSERT INTO classroom_question_sets(classroom_id,set_id)
+ SELECT id,'legacy-bank-'||id FROM classrooms;
+`;
+
 export const migrations = [
  {version:1,sql:multiTeacherMigration},
  {version:2,sql:studentBreakMigration},
@@ -196,6 +242,7 @@ CREATE TABLE watercycle_migration_runs (
  versions_before INTEGER[] NOT NULL, versions_after INTEGER[] NOT NULL, completed_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()
 );`},
  {version:6,sql:enrollmentScheduleMigration},
+ {version:7,sql:teacherEnhancementsMigration},
 ] as const;
 export const latestMigrationVersion = migrations.at(-1)!.version;
 /** Caller holds the PostgreSQL initialization lock and transaction. */

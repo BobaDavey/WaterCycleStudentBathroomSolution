@@ -141,14 +141,17 @@ test('teacher manages a roster account and question bank, then exports trip hist
     await page.getByRole('article').filter({ hasText: '01001' }).getByRole('button', { name: 'View Class', exact: true }).click();
     await page.getByRole('button', { name: 'Add student', exact: true }).click();
     let dialog = page.getByRole('dialog');
-    await dialog.getByLabel('First name', { exact: true }).fill('Rosa');
-    await dialog.getByLabel('Last name', { exact: true }).fill(surname);
-    await dialog.getByRole('button', { name: 'Add student', exact: true }).click();
+    const signupContext=await browser.newContext();
+    const signup=await signupContext.request.post('/api/auth/signup',{headers:{Origin:'http://127.0.0.1:3100','Content-Type':'application/json'},data:{firstName:'Rosa',lastName:surname,password:'InitialStudent2026!'}});expect(signup.ok()).toBe(true);
+    const assigned=(await signup.json()).user.username;await signupContext.close();expect(assigned).toBe(studentUsername);
+    await dialog.getByLabel('Student username',{exact:true}).fill(studentUsername);
+    await dialog.getByRole('button',{name:'Find Student',exact:true}).click();
+    await expect(dialog).toContainText(`Rosa ${surname}`);
+    await dialog.getByRole('button',{name:'Confirm Add Student',exact:true}).click();
     await expect(dialog).not.toBeVisible();
     const student = page.getByRole('row').filter({ hasText: studentUsername });
     await expect(student).toBeVisible();
-    // Teacher-created accounts receive an assigned username and temporary password;
-    // self-registration never claims someone else's identical-name account.
+    // Existing accounts can still receive an audited teacher password reset.
     await student.getByRole('button', { name: /Reset password/i }).click();
     dialog = page.getByRole('dialog');
     await dialog.getByLabel('Temporary password').fill('Temporary2026!');

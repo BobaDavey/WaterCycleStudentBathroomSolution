@@ -218,8 +218,11 @@ describe('Multi-teacher classes, enrollment, and administrator oversight', { con
       assert.equal(state.stats.out, 2);
       assert.equal(state.stats.waiting, 1);
     }
-    const firstQuestion = (await app.teacherState(teacher, firstClass.id)).questions[0];
-    await assert.rejects(() => app.deleteQuestion(teacher, firstQuestion.id, secondClass.id), status(404));
+    const firstBank=await app.teacherState(teacher,firstClass.id),secondBank=await app.teacherState(teacher,secondClass.id);
+    const firstQuestion=firstBank.questions.find(q=>q.setIds?.some(id=>firstBank.activeSetIds.includes(id)))!;
+    assert.ok(!firstQuestion.setIds?.some(id=>secondBank.activeSetIds.includes(id)));
+    await app.saveQuestion(teacher,firstQuestion,firstQuestion.id,secondClass.id);
+    assert.equal((await app.teacherState(teacher,secondClass.id)).eligibleQuestionCount,secondBank.eligibleQuestionCount);
     await assert.rejects(() => app.exportCsv(otherTeacher, firstClass.id), status(404));
   });
 

@@ -16,11 +16,13 @@ test('assigned usernames, empty My Classes and two class-specific approvals work
   const myClasses=student.getByRole('region',{name:'My Classes',exact:true});await expect(myClasses.getByText('Pending Approval',{exact:true})).toHaveCount(2);
   await expect(myClasses).toContainText('Demo Biology Morning');await expect(myClasses).toContainText('Demo Chemistry Afternoon');await expect(myClasses).toContainText('Monday–Friday');await expect(myClasses).toContainText('7:00 AM – 1:00 PM');
   const state=await(await student.request.get('/api/student/state')).json() as StudentState;
-  const pending=teacher.getByRole('region',{name:/Pending Student Approvals/});const rows=pending.getByRole('row').filter({hasText:firstUsername});await expect(rows).toHaveCount(2);
-  // Approve Chemistry while Biology remains Pending, even if another class is selected.
+  const pending=teacher.getByRole('region',{name:/Pending Student Approvals/});const rows=pending.getByRole('row').filter({hasText:firstUsername});
+  await teacher.getByLabel('Selected class',{exact:true}).selectOption(state.enrollments.find(e=>e.classroom.code==='DEMO2')!.classroom.id);await expect(rows).toHaveCount(1);
+  // Approve Chemistry, then switch Overview to Biology's separate pending enrollment.
   await rows.filter({hasText:'Demo Chemistry Afternoon'}).getByRole('button',{name:'Approve',exact:true}).click();
   await expect(myClasses.getByText('Approved',{exact:true})).toHaveCount(1);await expect(myClasses.getByText('Pending Approval',{exact:true})).toHaveCount(1);
   const updated=await(await student.request.get('/api/student/state')).json() as StudentState;expect(updated.enrollments.find(e=>e.classroom.code==='DEMO1')?.status).toBe('pending');expect(updated.enrollments.find(e=>e.classroom.code==='DEMO2')?.status).toBe('approved');
+  await teacher.getByLabel('Selected class',{exact:true}).selectOption(state.enrollments.find(e=>e.classroom.code==='DEMO1')!.classroom.id);await expect(rows).toHaveCount(1);
   await rows.filter({hasText:'Demo Biology Morning'}).getByRole('button',{name:'Approve',exact:true}).click();await expect(myClasses.getByText('Approved',{exact:true})).toHaveCount(2);
   expect(await student.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);await student.screenshot({path:'/tmp/watercycle-my-classes-mobile.png',fullPage:true});
   expect((await student.request.get('/api/admin/state')).status()).toBe(403);expect(state.user.username).toBe(firstUsername);

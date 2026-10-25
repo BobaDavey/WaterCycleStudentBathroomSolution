@@ -227,6 +227,8 @@ Legacy testing fixtures remain available: teachers `morganreed` / `mariamiller` 
 
 ## Deploy to Vercel with persistent data
 
+**Teacher Portal feature branch:** see [Teacher Portal enhancements, isolated testing and migration 7 rollout](docs/teacher-portal-enhancements.md). This release adds reusable Question Sets, class-specific activation, co-teachers, confirmed username enrollment and the Overview class selector. Review the PR before merging; production migration 7 is a separate, backed-up operator action.
+
 Follow the [production database and recovery guide](docs/production-database.md) before classroom use. Production and Preview require separate managed PostgreSQL databases, separately scoped Vercel variables, and distinct database identities. Runtime database credentials cannot own tables, change schemas, truncate, or hard-delete classroom records.
 
 **Vercel is Ready but the site says “Let’s reconnect”?** A new Neon connection still requires reviewed schema initialization and a restricted runtime role. Follow the [Neon and Vercel first deployment walkthrough](docs/production-database.md#neon-and-vercel-first-deployment-walkthrough) for the exact console steps, private configuration, backup, migration and grant commands. The read-only `npm run db:check` verifies runtime readiness before redeployment. Runtime failures now log safe categories/codes and a request reference rather than only `error`; public visitors do not receive database details.

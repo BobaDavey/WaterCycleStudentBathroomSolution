@@ -6,14 +6,14 @@ import { latestMigrationVersion, migrateDatabase, migrations } from './migration
 export const initializationLock = 874103921;
 export interface SchemaStatus { versions:number[]; pending:number[]; initialized:boolean; bound:boolean; }
 const fail=(message:string,code:DatabaseConfigurationCode='DB_CONFIGURATION'):never=>{throw new DatabaseConfigurationError(message,code);};
-const applicationTables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events','student_username_counters'];
+const applicationTables=['classrooms','users','sessions','questions','quizzes','visits','enrollments','rate_limits','student_status_events','break_corrections','problem_reports','problem_report_events','student_username_counters','classroom_teachers','question_sets','question_set_questions','classroom_question_sets'];
 const metadataTables=['watercycle_migrations','watercycle_database_identity','watercycle_migration_runs'];
 export async function schemaStatus(tx:SQL,binding:DatabaseBinding):Promise<SchemaStatus> {
  const {rows:[tables]}=await tx.query("SELECT to_regclass('public.watercycle_migrations') AS migrations,to_regclass('public.watercycle_database_identity') AS identity");
  const versions=tables.migrations?(await tx.query<{version:number}>('SELECT version FROM public.watercycle_migrations ORDER BY version')).rows.map(row=>Number(row.version)):[];
  if(versions.some((version,index)=>version!==index+1)||versions.some(version=>version>latestMigrationVersion))fail('Database schema history is incompatible with this release. Do not downgrade or edit the migration ledger.','DB_SCHEMA_INCOMPATIBLE');
  const base=['classrooms','users','sessions','questions','quizzes','visits','rate_limits'];
- const expected=[...base,...(versions.includes(1)?['enrollments']:[]),...(versions.includes(4)?['student_status_events','break_corrections','problem_reports','problem_report_events']:[]),...(versions.includes(5)?['watercycle_database_identity','watercycle_migration_runs']:[]),...(versions.includes(6)?['student_username_counters']:[])];
+ const expected=[...base,...(versions.includes(1)?['enrollments']:[]),...(versions.includes(4)?['student_status_events','break_corrections','problem_reports','problem_report_events']:[]),...(versions.includes(5)?['watercycle_database_identity','watercycle_migration_runs']:[]),...(versions.includes(6)?['student_username_counters']:[]),...(versions.includes(7)?['classroom_teachers','question_sets','question_set_questions','classroom_question_sets']:[])];
  const {rows:present}=await tx.query<{tablename:string}>("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename=ANY($1::text[])",[expected]);
  if((versions.length||present.length)&&expected.some(table=>!present.some(row=>row.tablename===table)))fail('Expected database tables are missing. Restore or reconcile the schema; initialization will not recreate missing classroom tables.','DB_SCHEMA_INCOMPATIBLE');
  let bound=false;

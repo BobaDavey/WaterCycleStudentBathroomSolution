@@ -7,13 +7,15 @@ export interface StudentEnrollment { id: string; classroom: Classroom; status: E
 export type VisitStatus = "waiting" | "ready" | "out" | "returned" | "cancelled";
 export type BreakPurpose = "restroom" | "water";
 export interface Visit { id: string; studentId: string; studentName: string; studentUsername?: string; classroomId?: string; classroomName?: string; timeZone?: string; status: VisitStatus; purpose: BreakPurpose | null; requestedAt: string; readyAt: string | null; readyExpiresAt: string | null; reservationPaused: boolean; leftAt: string | null; returnedAt: string | null; warningAcknowledgedAt: string | null; corrections: BreakCorrection[]; position?: number; cancellationReason?: string | null; }
-export interface Question { id: string; prompt: string; options: string[]; correctIndex: number; topic: string; explanation: string; active: boolean; }
+export interface Question { id: string; prompt: string; options: string[]; correctIndex: number; topic: string; explanation: string; active: boolean; createdAt?:string|null; setIds?:string[]; }
+export interface QuestionSet {id:string;name:string;description:string;questionCount:number;classCount:number;ownerTeacherId:string;}
+export interface ClassroomTeacher {id:string;firstName:string;lastName:string;username:string;primary:boolean;enabled:boolean;}
 export type QuizQuestion = Omit<Question, "correctIndex" | "explanation" | "active">;
 export interface Quiz { classroomId: string; id: string; purpose: BreakPurpose; correctCount: number; question: QuizQuestion; questionToken: string; expiresAt: string; notice?: string; }
 export interface PendingStudent extends RosterStudent { classroomName: string; period: string | null; }
 export interface RosterStudent { accountSuspended?: boolean; enrollmentId: string; enrollmentStatus: EnrollmentStatus; id: string; firstName: string; lastName: string; username: string; enabled: boolean; accountStatus: StudentAccountStatus; registeredAt: string; approvedAt: string | null; registered: boolean; mustChangePassword: boolean; visitsToday: number; classroomId: string | null; }
 export interface StudentState { enrollments: StudentEnrollment[]; eligibleClassroomIds: string[]; user: User; classroom: Classroom | null; currentVisit: Visit | null; activeQuiz: Quiz | null; serverNow: string; activeCount: number; waitingCount: number; recentVisits: Visit[]; availableQuestions: number; canRequestPass: boolean; unavailableReason?: string; }
-export interface TeacherState { user: User; pendingStudents: PendingStudent[]; classes: Classroom[]; classroom: Classroom | null; students: RosterStudent[]; questions: Question[]; visits: Visit[]; stats: { out: number; ready: number; waiting: number; tripsToday: number; averageMinutes: number }; }
+export interface TeacherState { user: User; pendingStudents: PendingStudent[]; classes: Classroom[]; classroom: Classroom | null; students: RosterStudent[]; questions: Question[]; questionSets:QuestionSet[];activeSetIds:string[];eligibleQuestionCount:number;teachers:ClassroomTeacher[]; visits: Visit[]; stats: { out: number; ready: number; waiting: number; tripsToday: number; averageMinutes: number }; }
 export interface AuthState { user: User | null; setupAvailable?: boolean; adminProvisioned?: boolean; developmentSetup?: 'missing-secret' | 'restart-required'; demo?: boolean; }
 export interface QuizResult { passed: boolean; correctCount: number; feedback: { questionId: string; correct: boolean; explanation: string }[]; quiz?: Quiz; visit?: Visit; }
 export interface TeacherAccount { id: string; firstName: string; lastName: string; username: string; email: string | null; enabled: boolean; mustChangePassword: boolean; classCount: number; studentCount: number; createdAt: string; }
@@ -37,12 +39,13 @@ export interface RuleOffendersState { violations: RuleViolation[]; nextCursor: s
 // POST /api/student/tutorial {} -> {ok:true} (save tutorial completion)
 // POST /api/student/visits/:id/warning {} -> {ok:true} (acknowledge own overdue active break)
 // POST /api/student/leave | return | cancel -> {ok:true}
-// GET /api/teacher/state?classroomId=optional -> TeacherState (default first active owned class; null if none)
+// GET /api/teacher/state?classroomId=optional -> TeacherState (default first active owned/shared class; null if none)
 // GET /api/teacher/violations?classroomId=optional&search=optional&cursor=optional&limit=50 -> RuleOffendersState
 // GET /api/admin/violations same filters -> RuleOffendersState (privileged oversight)
 // POST /api/teacher/classes {name,period?:string,code:string,timeZone?:string,startTime,endTime} -> {classroom}
 // PATCH /api/teacher/classes/:id {name?:string,period?:string,code?:string,archived?:boolean,timeZone?:string,startTime?:string,endTime?:string} -> {classroom}
-// POST /api/teacher/roster?classroomId=id {firstName,lastName} -> {student}
+// POST /api/teacher/roster/lookup?classroomId=id {username} -> {student: confirmed identity}
+// POST /api/teacher/roster?classroomId=id {username,studentId} -> {student}; existing registered account, audited Approved enrollment only
 // PATCH /api/teacher/roster/:studentId?classroomId=id {accountStatus?:active|deactivated,password?:string} -> {ok:true}
 // POST /api/teacher/roster/:studentId/remove?classroomId=source {} -> {ok:true}
 // POST /api/teacher/roster/:studentId/transfer?classroomId=source {classroomId:destination} -> {ok:true}
@@ -70,3 +73,8 @@ export interface ProblemReportsState { tickets: ProblemReport[]; nextCursor: str
 // GET /api/admin/reports?status=all|need_attention|solved&search=&cursor=&limit=50 -> ProblemReportsState
 // GET /api/admin/reports/:id -> ProblemReportDetail
 // PATCH /api/admin/reports/:id {status:'need_attention'|'solved'} -> {ok:true}
+
+// POST /api/teacher/classes/:id/teachers {username}; DELETE /api/teacher/classes/:id/teachers/:teacherId (Primary Teacher only).
+// POST/PATCH/DELETE /api/teacher/question-sets[/:id]?classroomId=id {name,description}; delete preserves questions.
+// PATCH /api/teacher/question-sets/:id/questions?classroomId=id {questionId,active}.
+// PATCH /api/teacher/classes/:id/active-sets {setIds:string[]}; class-specific, deduplicated eligibility.

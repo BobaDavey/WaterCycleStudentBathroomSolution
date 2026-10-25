@@ -88,8 +88,9 @@ test('class-local registrations, live break clocks, date filters and 24px Overvi
   const lastName=`Learner${Date.now()}`;
   const signup=await studentContext.request.post('/api/auth/signup',{headers,data:{firstName:'Timezone',lastName,password:'DevelopmentTimezone2026!',classroomCode:'TZACT'}});expect(signup.ok()).toBe(true);
   const user=(await signup.json()).user;expect((await studentContext.request.post('/api/student/enroll',{headers,data:{classroomCode:'TZACT'}})).ok()).toBe(true);
-  const state=await(await page.request.get('/api/teacher/state')).json() as TeacherState;
+  const state=await(await page.request.get(`/api/teacher/state?classroomId=${classroom.id}`)).json() as TeacherState;
   const pending=state.pendingStudents.find(item=>item.id===user.id)!;
+  await page.getByLabel('Selected class',{exact:true}).selectOption(classroom.id);
   const region=page.getByRole('region',{name:/Pending Student Approvals/});const row=region.getByRole('row').filter({hasText:user.username});
   await expect(row).toContainText(formatClassTimestamp(pending.registeredAt,'America/Los_Angeles',undefined,'en-US'));
   for(const [name,width,height] of [['desktop',1440,1100],['tablet',900,1200],['mobile',390,844]] as const){
