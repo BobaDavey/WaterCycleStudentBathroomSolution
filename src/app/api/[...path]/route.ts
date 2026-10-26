@@ -9,6 +9,7 @@ import type { User } from '@/lib/contracts';
 import { isSameOrigin, usesSecureCookie } from '@/lib/request-security';
 import { developmentDiagnostic } from '@/lib/development-diagnostics';
 import { logRequestFailure, requestReference, type RequestStage } from '@/lib/server-diagnostics';
+import {questionSetSchema,activeSetsSchema,setMembershipSchema} from '@/lib/question-sets';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
@@ -90,6 +91,19 @@ async function handle(request:NextRequest, context:Context) {
   if(route==='teacher/classes'&&method==='POST')return NextResponse.json({classroom:await app.createClass(user,classCreateSchema.parse(await json()))});
   if(path.length===3&&path[0]==='teacher'&&path[1]==='classes'&&method==='PATCH')return NextResponse.json({classroom:await app.updateClass(user,path[2],classUpdateSchema.parse(await json()))});
   if(route==='teacher/roster'&&method==='POST')return NextResponse.json({student:await app.addRoster(user,rosterSchema.parse(await json()),classroomId)});
+  if(route==='teacher/roster/lookup'&&method==='POST'){await rateLimit(db,`student-lookup:${user.id}`,30);const input=z.object({username:z.string().trim().min(1).max(100)}).parse(await json());return NextResponse.json({student:await app.lookupStudent(user,input.username,classroomId)});}
+  if(path[0]==='teacher'&&path[1]==='classes'&&path[2]&&path[3]==='teachers'){
+   if(path.length===4&&method==='POST'){const input=z.object({username:z.string().trim().min(1).max(100)}).parse(await json());await app.addCoTeacher(user,path[2],input.username);return ok();}
+   if(path.length===5&&method==='DELETE'){await app.removeCoTeacher(user,path[2],path[4]);return ok();}
+  }
+  if(path.length===4&&path[0]==='teacher'&&path[1]==='classes'&&path[3]==='active-sets'&&method==='PATCH'){await app.setActiveQuestionSets(user,path[2],activeSetsSchema.parse(await json()).setIds);return ok();}
+  if(path[0]==='teacher'&&path[1]==='question-sets'){
+   if(!classroomId)throw new AppError(400,'Select a classroom first.');
+   if(path.length===2&&method==='POST')return NextResponse.json(await app.saveQuestionSet(user,classroomId,questionSetSchema.parse(await json())));
+   if(path.length===3&&method==='PATCH')return NextResponse.json(await app.saveQuestionSet(user,classroomId,questionSetSchema.parse(await json()),path[2]));
+   if(path.length===3&&method==='DELETE'){await app.deleteQuestionSet(user,classroomId,path[2]);return ok();}
+   if(path.length===4&&path[3]==='questions'&&method==='PATCH'){const input=setMembershipSchema.parse(await json());await app.setQuestionMembership(user,classroomId,path[2],input.questionId,input.active);return ok();}
+  }
   if(path.length===3&&path[0]==='teacher'&&path[1]==='roster'){
    if(method==='GET')return NextResponse.json(await app.rosterDetail(user,path[2],classroomId));
    if(method==='PATCH'){await app.updateRoster(user,path[2],rosterUpdateSchema.parse(await json()),classroomId);return ok();}

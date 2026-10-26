@@ -1,3 +1,4 @@
+import {defaultQuestionSet} from '../src/lib/question-sets';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, type SQL } from '../src/lib/db';
 import { hashPassword } from '../src/lib/auth';
@@ -54,6 +55,10 @@ async function seed() {
     if (primary && !owner.classroom_id) await tx.query('UPDATE users SET classroom_id=$1 WHERE id=$2',[row.id,owner.id]);
     const {rows:[count]}=await tx.query<{n:string}>('SELECT COUNT(*) AS n FROM questions WHERE classroom_id=$1',[row.id]);
     if (Number(count.n)===0) for (const q of defaultQuestions) await tx.query('INSERT INTO questions(id,classroom_id,prompt,options,correct_index,topic,explanation,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[randomUUID(),row.id,q.prompt,JSON.stringify(q.options),q.correctIndex,q.topic,q.explanation,q.active]);
+    const initialized=(await tx.query('SELECT id FROM question_sets WHERE id=$1',[`legacy-bank-${row.id}`])).rows.length>0;
+    const setId=await defaultQuestionSet(tx,String(row.id));
+    // Initialize only a new demo bank. Later independent questions and deliberate removals stay unchanged.
+    if(!initialized){const {rows:bank}=await tx.query('SELECT id FROM questions WHERE classroom_id=$1 AND deleted=FALSE',[row.id]);for(const q of bank)await tx.query('INSERT INTO question_set_questions(set_id,question_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[setId,q.id]);}
     return row;
    }
    async function students(classroomId:unknown,names:string[][],hash=studentHash,extraClasses:unknown[]=[]) {

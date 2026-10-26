@@ -85,7 +85,10 @@ test('teacher class overview, leading-zero enrollment, duplicate errors, transfe
     await dialog.getByLabel('Destination class').selectOption(destination.id);
     await dialog.getByRole('button', { name: 'Confirm transfer', exact: true }).click();
     await expect(row).not.toBeVisible();
+    await teacher.getByRole('button',{name:'Overview',exact:true}).click();
     await teacher.getByLabel('Selected class', { exact: true }).selectOption(destination.id);
+    await teacher.getByRole('button',{name:'Class Roster',exact:true}).click();
+    await teacher.locator(`[data-classroom-id="${destination.id}"]`).getByRole('button',{name:'View Class',exact:true}).click();
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: 'Remove', exact: true }).click();
     await teacher.getByRole('dialog').getByRole('button', { name: 'Remove from class', exact: true }).click();

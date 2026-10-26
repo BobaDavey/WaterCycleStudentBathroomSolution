@@ -17,6 +17,7 @@ async function main(){
    let teacher=await app.login({username:account.username,password:passwords.temporary,role:'teacher'});
    await app.changePassword(teacher,passwords.temporary,passwords.teacher);teacher=await app.login({username:account.username,password:passwords.teacher,role:'teacher'});
    const classroom=await app.createClass(teacher,{name:'Persistent Biology',period:'1',code:'PER01',startTime:'00:00',endTime:'23:59'});
+   assert.equal(classroom.capacity,2);await app.updateClass(teacher,classroom.id,{capacity:5});
    // Disposable PostgreSQL regression fixture: exercise persisted custom days
    // so real production-server restart checks also run on weekends. New classes
    // created through the product still default to Monday–Friday.
@@ -41,6 +42,7 @@ async function main(){
    const state=await app.studentState(student);assert.equal(state.user.accountStatus,'active');assert.equal(state.user.tutorialCompleted,true);assert.equal(state.activeQuiz?.correctCount,1);
    assert.equal(state.recentVisits.length,1);assert.equal(state.recentVisits[0].corrections.length,1);assert.ok(state.recentVisits[0].warningAcknowledgedAt);
    const roster=await app.teacherState(teacher);assert.equal(roster.students.length,2);assert.equal(roster.pendingStudents.length,1);assert.ok(roster.questions.length>=2);
+   assert.equal(roster.classroom?.capacity,5);assert.equal(state.classroom?.capacity,5);
    const violations=await app.ruleOffenders(teacher);assert.equal(violations.violations.length,1);assert.equal(violations.violations[0].totalViolations,1);
    assert.equal((await app.problemReport(admin,saved.ticketId)).history.length,2);
    console.log('Existing accounts, password changes, sessions, rosters, learning, trips, violations, corrections, and tickets verified.');

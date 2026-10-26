@@ -1,3 +1,4 @@
+import {classroomScope} from './classroom-access';
 import { effectiveTimeZone } from './time-zones';
 import { z } from 'zod';
 import type { SQL } from './db';
@@ -35,7 +36,7 @@ export async function loadRuleOffenders(db: SQL, teacherId: string | null, filte
              WHEN v.status='returned' THEN v.returned_at END AS ended_at,
         v.status='out' AS ongoing
       FROM visits v JOIN classrooms c ON c.id=v.classroom_id JOIN users u ON u.id=v.student_id
-      WHERE ($1::text IS NULL OR c.teacher_id=$1) AND v.left_at IS NOT NULL
+      WHERE ($1::text IS NULL OR ${classroomScope('c','$1')}) AND v.left_at IS NOT NULL
     ), violations AS (
       SELECT *,COUNT(*) OVER(PARTITION BY student_id) AS total_violations,
         EXTRACT(EPOCH FROM(ended_at-left_at)) AS duration_seconds

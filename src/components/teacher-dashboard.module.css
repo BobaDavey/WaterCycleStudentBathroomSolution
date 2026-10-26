@@ -224,3 +224,6 @@
 .reservationNote { display: block; font-size: 9px; color: #8c7956; margin-top: 6px; white-space: normal; }
 
 .activityTabs{margin-bottom:20px}.activityTabs :global(.tab){min-width:110px}
+
+.overviewControls{display:flex;align-items:stretch;gap:16px;min-width:0}.overviewControls .classPicker{background:#fffdf8;border:1px solid #dddfd4;border-radius:8px;padding:12px;min-width:0}.overviewControls .classPicker select{max-width:240px;min-width:0;width:100%}.classroomActions{display:flex;gap:10px;flex-wrap:wrap}.teacherRoster,.setSummary,.setEditor{padding:22px;margin-bottom:24px}.teacherRow,.setSummary{display:flex;align-items:center;justify-content:space-between;gap:14px}.teacherRow{padding:12px 0;border-bottom:1px solid #e5e8dc}.teacherRow:last-child{border:0}.teacherRow p,.setSummary p{margin-top:6px}.setEditor{display:grid;gap:14px}.setEditor label{min-width:0}.questionToolbar{flex-wrap:wrap}.questionToolbar label{flex:1;min-width:140px}.questionToolbar select{max-width:100%}
+@media(max-width:700px){.overviewControls{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px}.overviewControls .classPicker select{max-width:100%}.setSummary,.teacherRow{flex-wrap:wrap}.classroomActions{width:100%}.pageHeading{flex-wrap:wrap;gap:18px}}
