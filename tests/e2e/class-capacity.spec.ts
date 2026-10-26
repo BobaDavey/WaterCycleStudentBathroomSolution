@@ -42,7 +42,7 @@ test('student browsers honor a one-pass classroom, wait in line, depart after re
    await expect(student.getByText('A maximum of 1 student at a time keeps things moving.',{exact:true})).toBeVisible();
   }
   const trip=await qualifyBreak(students[0],state.questions);expect(trip.status).toBe('out');
-  expect((await qualifyBreak(students[1],state.questions)).status).toBe('waiting');await expect(students[1].getByRole('heading',{name:"You're in line!",exact:true})).toBeVisible();
+  expect((await qualifyBreak(students[1],state.questions)).status).toBe('waiting');await expect(students[1].getByRole('heading',{name:"You're in WAITLINE!",exact:true})).toBeVisible();
   expect((await page.request.patch(`/api/teacher/classes/${classroom.id}`,{headers,data:{capacity:2}})).ok()).toBe(true);await expect(students[1].getByRole('button',{name:"I'm Leaving Now",exact:true})).toBeEnabled();await expect(students[1]).toHaveTitle("It's your turn! · WaterCycle");
   expect((await page.request.patch(`/api/teacher/classes/${classroom.id}`,{headers,data:{capacity:1}})).ok()).toBe(true);await expect(students[1].getByRole('heading',{name:'Your place is saved. Please wait for a spot.',exact:true})).toBeVisible();await expect(students[1].getByRole('button',{name:"I'm Leaving Now",exact:true})).toBeDisabled();await expect(students[1]).toHaveTitle('Your place is saved · WaterCycle');
   expect((await students[1].request.post('/api/student/leave',{headers,data:{}})).status()).toBe(409);

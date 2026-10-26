@@ -68,8 +68,8 @@ test('three students: quiz gate, two spaces, FIFO alert, departure and return re
     await expect(second.getByRole('button', { name: "I'm Back", exact: true })).toBeVisible();
     expect(((await (await second.request.get('/api/student/state')).json()) as StudentState).currentVisit?.leftAt).toBeTruthy();
     await requestPass(third, state.questions);
-    await expect(third.getByRole('heading', { name: "You're in line!", exact: true })).toBeVisible();
-    await expect(third.getByText('Your position: #1', { exact: true })).toBeVisible();
+    await expect(third.getByRole('heading', { name: "You're in WAITLINE!", exact: true })).toBeVisible();
+    await expect(third.getByText('You are in WAITLINE #1', { exact: true })).toBeVisible();
     const waiting = await (await third.request.get('/api/student/state')).json() as StudentState;
     expect(waiting.currentVisit?.position).toBe(1);
     expect(waiting.currentVisit?.status).toBe('waiting');
