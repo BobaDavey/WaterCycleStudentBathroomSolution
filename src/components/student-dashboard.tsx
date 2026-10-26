@@ -325,8 +325,8 @@ export function StudentDashboard({ user, onLogout }: { user: User; onLogout: () 
                       <div className={styles.passCardTop}><span className={styles.passTag}>{visit.status === "waiting" ? <Users size={16} /> : visit.status === "ready" ? <BellRing size={16} /> : <Footprints size={16} />}{visit.status === "waiting" ? "IN THE QUEUE" : visit.status === "ready" ? "YOUR TURN IS HERE" : "CURRENTLY ON BREAK"}</span><span className={styles.passId}>{visit.classroomName ?? "CLASSROOM BREAK"}</span></div>
                       <span className={styles.purposeBadge}>{visit.purpose === "water" ? <Droplets size={15} /> : <Toilet size={15} />}{purposeName(visit.purpose)}</span>
                       {visit.status === "waiting" ? <>
-                        <h2 aria-live="polite">You&apos;re in line!</h2>
-                        <div className={styles.queueNumber}><span>Your position:</span> #{visit.position ?? "—"}</div>
+                        <h2 aria-live="polite">You&apos;re in WAITLINE!</h2>
+                        <div className={styles.queueNumber}><span>You are in WAITLINE</span> #{visit.position ?? "—"}</div>
                         <p>We&apos;ll notify you here when a space opens. Keep this page open. Your break timer hasn&apos;t started.</p>
                         <div className={styles.passActions}><button className="button secondary" onClick={() => void enableAlerts()}>{sound ? <Volume2 size={17} /> : <Bell size={17} />}{sound ? "Turn alerts off" : "Enable turn alerts"}</button><button className="button ghost" disabled={busy} onClick={() => void action("/student/cancel", "Your request was cancelled.")}>Cancel Request</button></div>
                       </> : visit.status === "ready" ? <>
